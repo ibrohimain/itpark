@@ -24,6 +24,9 @@ const HomeworkPage: React.FC = () => {
   const [activeHW, setActiveHW] = useState<Homework | null>(null);
   const [content, setContent] = useState('');
 
+  const isStaff = profile?.role === 'director' || 
+    ['ustoz', 'yoramchi ustoz', 'direktor o\'rin bosari', 'dasturchi', 'mobilograf', 'backent', 'frontend', 'dizayner', 'xodim III darajali', 'xodim II darajali', 'xodim I darajali', 'staff'].includes(profile?.role || '');
+
   useEffect(() => {
     const unsubHW = firestoreService.subscribeToDocuments<Homework>('homework', [], (data) => {
       setHomeworks(data);
@@ -35,10 +38,8 @@ const HomeworkPage: React.FC = () => {
     let unsubGroups = () => {};
     let unsubSub = () => {};
 
-    const isStudent = ['student', 'o\'quvchi', 'shogirt', 'user'].includes(profile?.role || '');
-
     if (profile) {
-      if (isStudent) {
+      if (!isStaff) {
         unsubGroups = firestoreService.subscribeToDocuments<Group>('groups', [], (data) => {
           setUserGroups(data.filter(g => g.studentIds.includes(profile.uid)));
         });
@@ -87,10 +88,14 @@ const HomeworkPage: React.FC = () => {
     setDueDate('');
   };
 
+  const [expandedHomeworks, setExpandedHomeworks] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (id: string) => {
+    setExpandedHomeworks(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const getCourseName = (id: string) => courses.find(c => c.id === id)?.name || 'Nomaʼlum kurs';
   const getSubmission = (hwId: string) => submissions.find(s => s.homeworkId === hwId);
-
-  const isStaff = profile?.role === 'director' || !['student', 'o\'quvchi', 'shogirt', 'user'].includes(profile?.role || '');
   
   const filteredHomeworks = homeworks.filter(hw => {
     if (isStaff) return true;
@@ -156,9 +161,19 @@ const HomeworkPage: React.FC = () => {
               
               <h4 className="text-xs font-mono font-bold text-[#8E9299] uppercase tracking-widest mb-1">{getCourseName(hw.courseId)}</h4>
               <h3 className="text-lg font-bold text-[#141414] mb-3">{hw.title}</h3>
-              <p className="text-sm text-[#8E9299] line-clamp-2 mb-8 leading-relaxed">
-                {hw.description}
-              </p>
+              <div className="mb-8">
+                <p className={`text-sm text-[#8E9299] leading-relaxed transition-all duration-300 ${expandedHomeworks[hw.id] ? '' : 'line-clamp-2'}`}>
+                  {hw.description}
+                </p>
+                {hw.description.length > 80 && (
+                  <button 
+                    onClick={() => toggleExpand(hw.id)}
+                    className="text-xs font-bold text-[#141414] mt-2 hover:underline"
+                  >
+                    {expandedHomeworks[hw.id] ? 'Yopish' : 'Batafsil oʻqish'}
+                  </button>
+                )}
+              </div>
               
               <div className="mt-auto space-y-4">
                 <div className="flex items-center gap-2 text-xs text-[#8E9299]">
@@ -166,7 +181,7 @@ const HomeworkPage: React.FC = () => {
                   <span>Muddat: {new Date(hw.dueDate).toLocaleString()}</span>
                 </div>
                 
-                {profile?.role === 'student' && !submission && (
+                {!isStaff && !submission && (
                   <button
                     onClick={() => { setActiveHW(hw); setIsSubmitModalOpen(true); }}
                     className="w-full bg-[#141414] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"

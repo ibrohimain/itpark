@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { firestoreService } from '../lib/firestoreService';
-import { Course, Schedule, Homework } from '../types';
+import { Course, Schedule, Homework, Group } from '../types';
 import { 
   Users, 
   BookOpen, 
@@ -20,17 +20,25 @@ const Dashboard: React.FC = () => {
   const [nextLesson, setNextLesson] = useState<Schedule | null>(null);
   const [activeHomework, setActiveHomework] = useState<Homework[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [userGroups, setUserGroups] = useState<Group[]>([]);
 
   useEffect(() => {
     if (profile) {
-      // Fetch stats
       const fetchData = async () => {
         const cs = await firestoreService.listDocuments<Course>('courses');
         setCourses(cs);
         setCoursesCount(cs.length);
 
+        const groups = await firestoreService.listDocuments<Group>('groups');
+        const enrolledGroups = groups.filter(g => g.studentIds.includes(profile.uid));
+        setUserGroups(enrolledGroups);
+
         const hw = await firestoreService.listDocuments<Homework>('homework');
-        setActiveHomework(hw.slice(0, 3));
+        const isStaff = profile.role === 'director' || 
+          ['ustoz', 'staff'].includes(profile.role);
+          
+        const filteredHw = isStaff ? hw : hw.filter(h => enrolledGroups.some(g => g.courseId === h.courseId));
+        setActiveHomework(filteredHw.slice(0, 3));
 
         const schedules = await firestoreService.listDocuments<Schedule>('schedules');
         if (schedules.length > 0) {

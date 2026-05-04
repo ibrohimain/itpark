@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { firestoreService } from '../lib/firestoreService';
 import { Attendance, Course, UserProfile, Group } from '../types';
-import { Check, X, Clock, Calendar as CalendarIcon, Filter, Users, ChevronRight } from 'lucide-react';
+import { Check, X, Clock, Calendar as CalendarIcon, Filter, Users, ChevronRight, Download, ChevronLeft } from 'lucide-react';
 import { motion } from 'motion/react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const AttendancePage: React.FC = () => {
   const { profile } = useAuth();
@@ -14,6 +16,10 @@ const AttendancePage: React.FC = () => {
   
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [viewMode, setViewMode] = useState<'marking' | 'monitoring'>('marking');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [period, setPeriod] = useState<'week' | 'month'>('month');
 
   const isStaff = profile?.role === 'director' || 
     ['ustoz', 'yoramchi ustoz', 'direktor o\'rin bosari', 'dasturchi', 'mobilograf', 'backent', 'frontend', 'dizayner', 'xodim III darajali', 'xodim II darajali', 'xodim I darajali', 'staff'].includes(profile?.role || '');
@@ -26,9 +32,9 @@ const AttendancePage: React.FC = () => {
     });
     
     if (isStaff) {
-      const unsubStudents = firestoreService.subscribeToDocuments<UserProfile>('users', [{ field: 'role', operator: '==', value: 'student' }], setStudents);
+      const unsubStudents = firestoreService.subscribeToDocuments<UserProfile>('users', [{ field: 'role', operator: '==', value: 'o\'quvchi' }], setStudents);
       return () => { unsubCourses(); unsubGroups(); unsubStudents(); };
-    } else if (profile?.role === 'student' || !isStaff) {
+    } else if (!isStaff) {
       const unsubAtt = firestoreService.subscribeToDocuments<Attendance>('attendance', [{ field: 'studentId', operator: '==', value: profile?.uid }], setAttendances);
       return () => { unsubCourses(); unsubGroups(); unsubAtt(); };
     }
@@ -36,17 +42,27 @@ const AttendancePage: React.FC = () => {
   }, [profile, isStaff]);
 
   useEffect(() => {
-    if (selectedGroupId && selectedDate && isStaff) {
+    if (selectedGroupId && isStaff) {
       const group = groups.find(g => g.id === selectedGroupId);
       if (group) {
-        const unsubAtt = firestoreService.subscribeToDocuments<Attendance>('attendance', [
-          { field: 'courseId', operator: '==', value: group.courseId },
-          { field: 'date', operator: '==', value: selectedDate }
-        ], setAttendances);
+        const queries: any[] = [{ field: 'courseId', operator: '==', value: group.courseId }];
+        
+        if (viewMode === 'marking') {
+          queries.push({ field: 'date', operator: '==', value: selectedDate });
+        } else {
+          const startDate = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
+          const endDate = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+          queries.push({ field: 'date', operator: '>=', value: startDate });
+          queries.push({ field: 'date', operator: '<=', value: endDate });
+        }
+        
+        const unsubAtt = firestoreService.subscribeToDocuments<Attendance>('attendance', queries, (data) => {
+          setAttendances(data);
+        });
         return () => unsubAtt();
       }
     }
-  }, [selectedGroupId, selectedDate, isStaff, groups]);
+  }, [selectedGroupId, selectedDate, isStaff, groups, viewMode, selectedMonth, selectedYear]);
 
   const markAttendance = async (studentId: string, status: 'present' | 'absent' | 'late') => {
     const group = groups.find(g => g.id === selectedGroupId);
@@ -80,7 +96,9 @@ const AttendancePage: React.FC = () => {
   const getCourseName = (id: string) => courses.find(c => c.id === id)?.name || 'Nomaʼlum kurs';
 
   const selectedGroup = groups.find(g => g.id === selectedGroupId);
-  const groupStudents = students.filter(s => selectedGroup?.studentIds.includes(s.uid));
+  const groupStudents = students
+    .filter(s => selectedGroup?.studentIds.includes(s.uid))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   const markAllStatus = async (status: 'present' | 'absent' | 'late') => {
     if (!selectedGroup) return;
@@ -89,11 +107,87 @@ const AttendancePage: React.FC = () => {
     }
   };
 
+  const getDates = () => {
+    const dates = [];
+    if (viewMode === 'monitoring') {
+      const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+      for (let i = 1; i <= daysInMonth; i++) {
+        const d = new Date(selectedYear, selectedMonth, i);
+        dates.push(d.toISOString().split('T')[0]);
+      }
+    } else {
+      const count = 7;
+      const start = new Date();
+      start.setDate(start.getDate() - (count - 1));
+      for (let i = 0; i < count; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        dates.push(d.toISOString().split('T')[0]);
+      }
+    }
+    return dates;
+  };
+
+  const monitoringDates = getDates();
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const groupName = selectedGroup?.name || 'Guruh';
+    const monthName = new Intl.DateTimeFormat('uz-UZ', { month: 'long' }).format(new Date(selectedYear, selectedMonth));
+    
+    doc.setFontSize(16);
+    doc.text(`${groupName} - ${monthName} ${selectedYear} Davomat Hisoboti`, 14, 15);
+    
+    const tableHeaders = ['Talaba', ...monitoringDates.map(d => d.split('-')[2])];
+    const tableRows = groupStudents.map(student => {
+      const row = [student.fullName];
+      monitoringDates.forEach(date => {
+        const att = attendances.find(a => a.studentId === student.uid && a.date === date);
+        if (att) {
+          row.push(att.status === 'present' ? '+' : att.status === 'absent' ? '-' : 'k');
+        } else {
+          row.push('.');
+        }
+      });
+      return row;
+    });
+
+    autoTable(doc, {
+      head: [tableHeaders],
+      body: tableRows,
+      startY: 25,
+      styles: { fontSize: 7, cellPadding: 1 },
+      headStyles: { fillColor: [20, 20, 20] },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 35 } }
+    });
+
+    doc.save(`${groupName}_davomat_${monthName}_${selectedYear}.pdf`);
+  };
+
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-[#141414] tracking-tight">Davomat</h1>
-        <p className="text-[#8E9299] text-sm mt-1">Darslarga kelish koʻrsatkichlari tizimi</p>
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-[#141414] tracking-tight">Davomat</h1>
+          <p className="text-[#8E9299] text-sm mt-1">Darslarga kelish koʻrsatkichlari tizimi</p>
+        </div>
+        
+        {isStaff && (
+          <div className="flex bg-[#F5F5F7] p-1.5 rounded-2xl border border-[#E4E3E0]">
+            <button 
+              onClick={() => setViewMode('marking')}
+              className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${viewMode === 'marking' ? 'bg-white text-[#141414] shadow-sm' : 'text-[#8E9299] hover:text-[#141414]'}`}
+            >
+              Qayd etish
+            </button>
+            <button 
+              onClick={() => setViewMode('monitoring')}
+              className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${viewMode === 'monitoring' ? 'bg-white text-[#141414] shadow-sm' : 'text-[#8E9299] hover:text-[#141414]'}`}
+            >
+              Monitoring
+            </button>
+          </div>
+        )}
       </div>
 
       {isStaff ? (
@@ -109,72 +203,188 @@ const AttendancePage: React.FC = () => {
                 {groups.map(g => <option key={g.id} value={g.id}>{g.name} ({getCourseName(g.courseId)})</option>)}
               </select>
             </div>
-            <div className="flex-1 space-y-2">
-              <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Sana</label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
-              />
-            </div>
+            
+            {viewMode === 'marking' ? (
+              <div className="flex-1 space-y-2">
+                <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Sana</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                />
+              </div>
+            ) : (
+              <div className="flex-1 space-y-2">
+                <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Oy va Yil</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                  >
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <option key={i} value={i}>
+                        {new Intl.DateTimeFormat('uz-UZ', { month: 'long' }).format(new Date(2000, i))}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                  >
+                    {[2024, 2025, 2026].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="bg-white rounded-3xl border border-[#E4E3E0] overflow-hidden shadow-sm">
-            <div className="p-6 border-b border-[#E4E3E0] bg-[#F5F5F7]/30 flex flex-wrap items-center justify-between gap-4">
-               <h3 className="font-bold text-[#141414]">{selectedGroup?.name} roʻyxati</h3>
-               <div className="flex gap-2">
-                 <button onClick={() => markAllStatus('present')} className="px-4 py-2 bg-green-500 text-white text-[10px] font-bold rounded-xl hover:bg-green-600 transition-all flex items-center gap-1">
-                   <Check size={14} /> Hammani keldi deb belgilash
-                 </button>
-                 <button onClick={() => markAllStatus('absent')} className="px-4 py-2 bg-red-500 text-white text-[10px] font-bold rounded-xl hover:bg-red-600 transition-all flex items-center gap-1">
-                   <X size={14} /> Hammani yoʻq deb belgilash
-                 </button>
-               </div>
+          {viewMode === 'marking' ? (
+            <div className="bg-white rounded-3xl border border-[#E4E3E0] overflow-hidden shadow-sm">
+              <div className="p-6 border-b border-[#E4E3E0] bg-[#F5F5F7]/30 flex flex-wrap items-center justify-between gap-4">
+                 <h3 className="font-bold text-[#141414]">{selectedGroup?.name} roʻyxati ({groupStudents.length} talaba)</h3>
+                 <div className="flex gap-2">
+                   <button onClick={() => markAllStatus('present')} className="px-4 py-2 bg-green-500 text-white text-[10px] font-bold rounded-xl hover:bg-green-600 transition-all flex items-center gap-1">
+                     <Check size={14} /> Hammani keldi
+                   </button>
+                   <button onClick={() => markAllStatus('absent')} className="px-4 py-2 bg-red-500 text-white text-[10px] font-bold rounded-xl hover:bg-red-600 transition-all flex items-center gap-1">
+                     <X size={14} /> Hammani yoʻq
+                   </button>
+                 </div>
+              </div>
+              <table className="w-full text-left">
+                <thead className="bg-[#F5F5F7] border-b border-[#E4E3E0]">
+                  <tr>
+                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Talaba</th>
+                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Holat</th>
+                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299] text-center">Amal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E4E3E0]">
+                  {groupStudents.map((s, i) => {
+                    const att = attendances.find(a => a.studentId === s.uid && a.date === selectedDate);
+                    return (
+                      <motion.tr 
+                        key={s.uid}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.02 }}
+                        className={`${!att ? 'bg-blue-50/20' : ''} transition-colors`}
+                      >
+                        <td className="px-8 py-5">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${!att ? 'bg-blue-100 text-blue-600' : 'bg-[#E4E3E0] text-[#141414]'}`}>
+                              {s.fullName.charAt(0)}
+                            </div>
+                            <div>
+                              <span className="font-bold text-[#141414] text-sm block">{s.fullName}</span>
+                              {!att && <span className="text-[9px] text-blue-500 font-bold uppercase tracking-tighter">Belgilash zarur</span>}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-8 py-5">
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${getStatusColor(att?.status || '')}`}>
+                            {att?.status || '—'}
+                          </span>
+                        </td>
+                        <td className="px-8 py-5">
+                          <div className="flex justify-center gap-2">
+                            <button onClick={() => markAttendance(s.uid, 'present')} className="px-3 py-2 rounded-xl bg-green-50 text-green-600 hover:bg-green-500 hover:text-white transition-all flex items-center gap-1 text-[10px] font-bold border border-green-100">
+                              <Check size={14} /> Keldi
+                            </button>
+                            <button onClick={() => markAttendance(s.uid, 'absent')} className="px-3 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-500 hover:text-white transition-all flex items-center gap-1 text-[10px] font-bold border border-red-100">
+                              <X size={14} /> Yoʻq
+                            </button>
+                            <button onClick={() => markAttendance(s.uid, 'late')} className="px-3 py-2 rounded-xl bg-orange-50 text-orange-600 hover:bg-orange-500 hover:text-white transition-all flex items-center gap-1 text-[10px] font-bold border border-orange-100">
+                              <Clock size={14} /> Kech
+                            </button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <table className="w-full text-left">
-              <thead className="bg-[#F5F5F7] border-b border-[#E4E3E0]">
-                <tr>
-                  <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Talaba</th>
-                  <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Holat</th>
-                  <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299] text-center">Oʻzgartirish</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#E4E3E0]">
-                {groupStudents.map((s, i) => {
-                  const att = attendances.find(a => a.studentId === s.uid);
-                  return (
-                    <motion.tr 
-                      key={s.uid}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.02 }}
-                    >
-                      <td className="px-8 py-5 font-bold text-[#141414] text-sm">{s.fullName}</td>
-                      <td className="px-8 py-5">
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${getStatusColor(att?.status || '')}`}>
-                          {att?.status || 'Belgilanmagan'}
-                        </span>
-                      </td>
-                      <td className="px-8 py-5">
-                        <div className="flex justify-center gap-2">
-                          <button onClick={() => markAttendance(s.uid, 'present')} className="px-3 py-2 rounded-xl bg-green-50 text-green-600 hover:bg-green-500 hover:text-white transition-all flex items-center gap-1 text-[10px] font-bold border border-green-100">
-                            <Check size={14} /> Keldi
-                          </button>
-                          <button onClick={() => markAttendance(s.uid, 'absent')} className="px-3 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-500 hover:text-white transition-all flex items-center gap-1 text-[10px] font-bold border border-red-100">
-                            <X size={14} /> Yoʻq
-                          </button>
-                          <button onClick={() => markAttendance(s.uid, 'late')} className="px-3 py-2 rounded-xl bg-orange-50 text-orange-600 hover:bg-orange-500 hover:text-white transition-all flex items-center gap-1 text-[10px] font-bold border border-orange-100">
-                            <Clock size={14} /> Kech
-                          </button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          ) : (
+            <div className="bg-white rounded-3xl border border-[#E4E3E0] overflow-hidden shadow-sm">
+              <div className="p-6 border-b border-[#F5F5F7] flex items-center justify-between">
+                <h3 className="font-bold text-[#141414] flex items-center gap-2">
+                  <CalendarIcon size={18} className="text-[#8E9299]" />
+                  Davomat Monitoringi ({new Intl.DateTimeFormat('uz-UZ', { month: 'long' }).format(new Date(selectedYear, selectedMonth))} {selectedYear})
+                </h3>
+                <button 
+                  onClick={handleExportPDF}
+                  className="px-4 py-2 bg-[#141414] text-white text-[10px] font-bold rounded-xl flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                >
+                  <Download size={14} /> PDF Yuklash
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-[#F5F5F7] border-b border-[#E4E3E0]">
+                    <tr>
+                      <th className="sticky left-0 bg-[#F5F5F7] px-6 py-4 text-[10px] font-mono uppercase tracking-widest text-[#8E9299] min-w-[200px] border-r border-[#E4E3E0]">
+                        Talaba Ismi
+                      </th>
+                      {monitoringDates.map(date => (
+                        <th key={date} className="px-3 py-4 text-center min-w-[45px] text-[10px] font-mono text-[#8E9299] border-r border-[#E4E3E0]">
+                          {date.split('-').slice(1).reverse().join('/')}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E4E3E0]">
+                    {groupStudents.map(student => (
+                      <tr key={student.uid} className="hover:bg-[#F5F5F7]/30 transition-colors">
+                        <td className="sticky left-0 bg-white px-6 py-3 font-bold text-[#141414] text-xs border-r border-[#E4E3E0] shadow-[5px_0_10px_-5px_rgba(0,0,0,0.05)]">
+                          {student.fullName}
+                        </td>
+                        {monitoringDates.map(date => {
+                          const att = attendances.find(a => a.studentId === student.uid && a.date === date);
+                          return (
+                            <td key={date} className="p-2 border-r border-[#E4E3E0] text-center">
+                              {att ? (
+                                <div className={`w-6 h-6 mx-auto rounded-lg flex items-center justify-center ${
+                                  att.status === 'present' ? 'bg-green-500 text-white' : 
+                                  att.status === 'absent' ? 'bg-red-500 text-white' : 
+                                  'bg-orange-500 text-white'
+                                }`}>
+                                  {att.status === 'present' ? <Check size={12} /> : 
+                                   att.status === 'absent' ? <X size={12} /> : 
+                                   <Clock size={12} />}
+                                </div>
+                              ) : (
+                                <div className="w-1.5 h-1.5 bg-[#E4E3E0] rounded-full mx-auto" />
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="p-4 bg-[#F5F5F7] border-t border-[#E4E3E0] flex gap-6 justify-center">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-md bg-green-500" />
+                  <span className="text-[10px] font-bold text-[#8E9299]">Keldi</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-md bg-red-500" />
+                  <span className="text-[10px] font-bold text-[#8E9299]">Kelmagan</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-md bg-orange-500" />
+                  <span className="text-[10px] font-bold text-[#8E9299]">Kechikkan</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
