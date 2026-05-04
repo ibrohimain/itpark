@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access control.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "staff", "director"] },
+        "major": { "type": "string", "description": "Student major or staff expertise." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "fullName"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "A study course offered at IT Park.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "duration": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "description"]
+    },
+    "Schedule": {
+      "title": "Schedule",
+      "description": "Lesson schedule for a course.",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "dayOfWeek": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "room": { "type": "string" },
+        "staffId": { "type": "string", "description": "Teacher assigned to this slot." },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["courseId", "dayOfWeek", "startTime", "endTime"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Daily attendance record for students.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["present", "absent", "late"] },
+        "markedBy": { "type": "string" }
+      },
+      "required": ["studentId", "courseId", "date", "status"]
+    },
+    "Homework": {
+      "title": "Homework",
+      "description": "Assignments given to students.",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "staffId": { "type": "string" }
+      },
+      "required": ["courseId", "title", "description", "dueDate"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Student homework submission.",
+      "type": "object",
+      "properties": {
+        "homeworkId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "content": { "type": "string" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "grade": { "type": "number" },
+        "feedback": { "type": "string" }
+      },
+      "required": ["homeworkId", "studentId", "content", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "users": { "schema": "User", "description": "User profiles" },
+    "courses": { "schema": "Course", "description": "Available courses" },
+    "schedules": { "schema": "Schedule", "description": "Course timetables" },
+    "attendance": { "schema": "Attendance", "description": "Attendance tracking" },
+    "homework": { "schema": "Homework", "description": "Course assignments" },
+    "submissions": { "schema": "Submission", "description": "Student homework uploads" },
+    "groups": { "schema": "Group", "description": "Student groups for courses" },
+    "courseRequests": { "schema": "CourseRequest", "description": "Course enrollment requests" },
+    "notifications": { "schema": "AppNotification", "description": "User notifications" }
+  }
+}

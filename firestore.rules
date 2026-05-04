@@ -1,0 +1,158 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isDirector() {
+      return isSignedIn() && (
+        request.auth.token.email == 'direktor@gmail.com' || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'director' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'direktor o\'rin bosari'))
+      );
+    }
+
+    function isStaff() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in [
+               'ustoz', 'yoramchi ustoz', 'dasturchi', 'mobilograf', 
+               'backent', 'frontend', 'dizayner', 'xodim III darajali', 
+               'xodim II darajali', 'xodim I darajali', 'staff'
+             ];
+    }
+
+    function isStudent() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['o\'quvchi', 'shogirt', 'student'];
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'fullName', 'role']) &&
+             data.uid is string && data.email is string &&
+             data.fullName is string && data.fullName.size() <= 100 &&
+             data.role in [
+               'user', 'shogirt', 'yoramchi ustoz', 'o\'quvchi', 'ustoz', 
+               'direktor o\'rin bosari', 'dasturchi', 'mobilograf', 
+               'backent', 'frontend', 'dizayner', 'xodim III darajali', 
+               'xodim II darajali', 'xodim I darajali', 'director', 'staff', 'student'
+             ];
+    }
+
+    function isValidCourse(data) {
+      return data.keys().hasAll(['name', 'description']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.description is string && data.description.size() <= 1000;
+    }
+
+    function isValidSubmission(data) {
+      return data.keys().hasAll(['homeworkId', 'studentId', 'content', 'submittedAt']) &&
+             data.studentId == request.auth.uid &&
+             data.submittedAt == request.time;
+    }
+
+    // --- Collections ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isOwner(userId) || isDirector() || isStaff());
+      allow list: if isSignedIn() && (isDirector() || isStaff());
+      allow create: if isSignedIn() && isOwner(userId) && isValidUser(incoming()) && (
+        incoming().role == 'user' || incoming().role == 'student' || 
+        (request.auth.token.email == 'direktor@gmail.com' && incoming().role == 'director')
+      );
+      allow update: if isSignedIn() && (
+        (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'major'])) ||
+        isDirector() || (isStaff() && incoming().diff(existing()).affectedKeys().hasOnly(['points']))
+      );
+      allow delete: if isDirector();
+    }
+
+    match /courses/{courseId} {
+      allow read: if isSignedIn();
+      allow write: if isDirector();
+    }
+
+    match /schedules/{scheduleId} {
+      allow read: if isSignedIn();
+      allow write: if isDirector() || isStaff();
+    }
+
+    match /attendance/{attendanceId} {
+      allow get: if isSignedIn() && (isDirector() || isStaff() || isOwner(existing().studentId));
+      allow list: if isSignedIn() && (isDirector() || isStaff() || (resource != null && isOwner(resource.data.studentId)));
+      allow create: if (isDirector() || isStaff()) && 
+                    exists(/databases/$(database)/documents/courses/$(incoming().courseId)) &&
+                    exists(/databases/$(database)/documents/users/$(incoming().studentId));
+      allow update, delete: if isDirector() || isStaff();
+    }
+
+    match /homework/{homeworkId} {
+      allow read: if isSignedIn();
+      allow write: if isDirector() || isStaff();
+    }
+
+    match /submissions/{submissionId} {
+      allow get: if isSignedIn() && (isOwner(existing().studentId) || isDirector() || isStaff());
+      allow list: if isSignedIn() && (isDirector() || isStaff() || (resource != null && isOwner(resource.data.studentId)));
+      allow create: if isStudent() && isValidSubmission(incoming()) &&
+                    exists(/databases/$(database)/documents/homework/$(incoming().homeworkId));
+      allow update: if (isStudent() && isOwner(existing().studentId) && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'submittedAt'])) ||
+                    ((isDirector() || isStaff()) && incoming().diff(existing()).affectedKeys().hasOnly(['grade', 'feedback']));
+      allow delete: if isDirector() || isStaff();
+    }
+
+    match /groups/{groupId} {
+      allow read: if isSignedIn();
+      allow write: if isDirector() || isStaff();
+    }
+
+    match /courseRequests/{requestId} {
+      allow get: if isSignedIn() && (isDirector() || isStaff() || isOwner(existing().userId));
+      allow list: if isSignedIn() && (isDirector() || isStaff());
+      allow create: if isSignedIn() && isOwner(incoming().userId);
+      allow update: if isDirector() || isStaff();
+      allow delete: if isDirector() || isOwner(existing().userId);
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (isOwner(resource.data.userId) || isDirector());
+      allow create: if isDirector() || isStaff();
+      allow update: if isOwner(resource.data.userId) && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isOwner(resource.data.userId);
+    }
+  }
+}
