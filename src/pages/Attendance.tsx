@@ -42,22 +42,34 @@ const AttendancePage: React.FC = () => {
   }, [profile, isStaff]);
 
   useEffect(() => {
+    if (profile && !isStaff) {
+      const unsubAtt = firestoreService.subscribeToDocuments<Attendance>('attendance', [
+        { field: 'studentId', operator: '==', value: profile.uid }
+      ], (data) => {
+        const start = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
+        const end = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+        setAttendances(data.filter(a => a.date >= start && a.date <= end));
+      });
+      
+      return () => unsubAtt();
+    }
+  }, [profile, isStaff, selectedMonth, selectedYear]);
+
+  useEffect(() => {
     if (selectedGroupId && isStaff) {
       const group = groups.find(g => g.id === selectedGroupId);
       if (group) {
-        const queries: any[] = [{ field: 'courseId', operator: '==', value: group.courseId }];
-        
-        if (viewMode === 'marking') {
-          queries.push({ field: 'date', operator: '==', value: selectedDate });
-        } else {
-          const startDate = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
-          const endDate = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
-          queries.push({ field: 'date', operator: '>=', value: startDate });
-          queries.push({ field: 'date', operator: '<=', value: endDate });
-        }
-        
-        const unsubAtt = firestoreService.subscribeToDocuments<Attendance>('attendance', queries, (data) => {
-          setAttendances(data);
+        // Query only by courseId to avoid composite index requirement
+        const unsubAtt = firestoreService.subscribeToDocuments<Attendance>('attendance', [
+          { field: 'courseId', operator: '==', value: group.courseId }
+        ], (data) => {
+          if (viewMode === 'marking') {
+            setAttendances(data.filter(a => a.date === selectedDate));
+          } else {
+            const start = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
+            const end = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+            setAttendances(data.filter(a => a.date >= start && a.date <= end));
+          }
         });
         return () => unsubAtt();
       }
@@ -132,15 +144,19 @@ const AttendancePage: React.FC = () => {
 
   const handleExportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
-    const groupName = selectedGroup?.name || 'Guruh';
+    const groupName = isStaff ? (selectedGroup?.name || 'Guruh') : 'Mening';
     const monthName = new Intl.DateTimeFormat('uz-UZ', { month: 'long' }).format(new Date(selectedYear, selectedMonth));
     
     doc.setFontSize(16);
     doc.text(`${groupName} - ${monthName} ${selectedYear} Davomat Hisoboti`, 14, 15);
     
     const tableHeaders = ['Talaba', ...monitoringDates.map(d => d.split('-')[2])];
-    const tableRows = groupStudents.map(student => {
-      const row = [student.fullName];
+    
+    // If staff, export all group students. If student, export only self.
+    const exportStudents = isStaff ? groupStudents : (profile ? [profile] : []);
+    
+    const tableRows = exportStudents.map(student => {
+      const row = [student.fullName || 'Talaba'];
       monitoringDates.forEach(date => {
         const att = attendances.find(a => a.studentId === student.uid && a.date === date);
         if (att) {
@@ -164,6 +180,22 @@ const AttendancePage: React.FC = () => {
     doc.save(`${groupName}_davomat_${monthName}_${selectedYear}.pdf`);
   };
 
+  const changeMonth = (offset: number) => {
+    let nextMonth = selectedMonth + offset;
+    let nextYear = selectedYear;
+
+    if (nextMonth > 11) {
+      nextMonth = 0;
+      nextYear++;
+    } else if (nextMonth < 0) {
+      nextMonth = 11;
+      nextYear--;
+    }
+
+    setSelectedMonth(nextMonth);
+    setSelectedYear(nextYear);
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -172,7 +204,7 @@ const AttendancePage: React.FC = () => {
           <p className="text-[#8E9299] text-sm mt-1">Darslarga kelish koʻrsatkichlari tizimi</p>
         </div>
         
-        {isStaff && (
+        {isStaff ? (
           <div className="flex bg-[#F5F5F7] p-1.5 rounded-2xl border border-[#E4E3E0]">
             <button 
               onClick={() => setViewMode('marking')}
@@ -185,6 +217,24 @@ const AttendancePage: React.FC = () => {
               className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${viewMode === 'monitoring' ? 'bg-white text-[#141414] shadow-sm' : 'text-[#8E9299] hover:text-[#141414]'}`}
             >
               Monitoring
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center bg-[#F5F5F7] p-1.5 rounded-2xl border border-[#E4E3E0] gap-2">
+            <button 
+              onClick={() => changeMonth(-1)}
+              className="p-2 text-[#8E9299] hover:text-[#141414] hover:bg-white rounded-xl transition-all"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <div className="px-4 py-1.5 bg-white rounded-xl shadow-sm text-xs font-bold text-[#141414] min-w-[120px] text-center">
+              {new Intl.DateTimeFormat('uz-UZ', { month: 'long', year: 'numeric' }).format(new Date(selectedYear, selectedMonth))}
+            </div>
+            <button 
+              onClick={() => changeMonth(1)}
+              className="p-2 text-[#8E9299] hover:text-[#141414] hover:bg-white rounded-xl transition-all"
+            >
+              <ChevronRight size={16} />
             </button>
           </div>
         )}
@@ -217,11 +267,17 @@ const AttendancePage: React.FC = () => {
             ) : (
               <div className="flex-1 space-y-2">
                 <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Oy va Yil</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => changeMonth(-1)}
+                    className="p-4 bg-[#F5F5F7] rounded-2xl text-[#141414] hover:bg-[#E4E3E0] transition-colors"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
                   <select
                     value={selectedMonth}
                     onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                    className="flex-1 px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm font-bold"
                   >
                     {Array.from({ length: 12 }).map((_, i) => (
                       <option key={i} value={i}>
@@ -232,12 +288,18 @@ const AttendancePage: React.FC = () => {
                   <select
                     value={selectedYear}
                     onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                    className="w-32 px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm font-bold"
                   >
                     {[2024, 2025, 2026].map(y => (
                       <option key={y} value={y}>{y}</option>
                     ))}
                   </select>
+                  <button 
+                    onClick={() => changeMonth(1)}
+                    className="p-4 bg-[#F5F5F7] rounded-2xl text-[#141414] hover:bg-[#E4E3E0] transition-colors"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
                 </div>
               </div>
             )}
@@ -387,24 +449,90 @@ const AttendancePage: React.FC = () => {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {attendances.map((att, i) => (
-            <motion.div
-              key={att.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="bg-white p-6 rounded-3xl border border-[#E4E3E0] shadow-sm flex items-center justify-between"
-            >
-              <div>
-                <p className="text-xs font-mono font-bold text-[#8E9299] uppercase tracking-widest">{getCourseName(att.courseId)}</p>
-                <h4 className="text-sm font-bold text-[#141414] mt-1">{att.date}</h4>
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl border border-[#E4E3E0] overflow-hidden shadow-sm">
+            <div className="p-6 border-b border-[#F5F5F7] flex items-center justify-between">
+              <h3 className="font-bold text-[#141414] flex items-center gap-2">
+                <CalendarIcon size={18} className="text-[#8E9299]" />
+                Shaxsiy Davomat Tarixi ({new Intl.DateTimeFormat('uz-UZ', { month: 'long' }).format(new Date(selectedYear, selectedMonth))} {selectedYear})
+              </h3>
+              <button 
+                onClick={handleExportPDF}
+                className="px-4 py-2 bg-[#141414] text-white text-[10px] font-bold rounded-xl flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+              >
+                <Download size={14} /> Tarixni PDF Yuklash
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-x-auto">
+              <div className="flex flex-wrap gap-2 min-w-[300px]">
+                {monitoringDates.map(date => {
+                  const att = attendances.find(a => a.date === date);
+                  const day = date.split('-')[2];
+                  return (
+                    <div 
+                      key={date}
+                      className={`flex flex-col items-center justify-center w-12 h-16 rounded-xl border transition-all ${
+                        att?.status === 'present' ? 'bg-green-50 border-green-200 text-green-700' : 
+                        att?.status === 'absent' ? 'bg-red-50 border-red-200 text-red-700' : 
+                        att?.status === 'late' ? 'bg-orange-50 border-orange-200 text-orange-700' : 
+                        'bg-[#F5F5F7] border-[#E4E3E0] text-[#8E9299]'
+                      }`}
+                    >
+                      <span className="text-[10px] font-mono opacity-60 mb-1">{day}</span>
+                      {att?.status === 'present' ? <Check size={18} strokeWidth={3} /> : 
+                       att?.status === 'absent' ? <X size={18} strokeWidth={3} /> : 
+                       att?.status === 'late' ? <Clock size={18} strokeWidth={3} /> : 
+                       <div className="w-1.5 h-1.5 bg-[#E4E3E0] rounded-full" />}
+                    </div>
+                  );
+                })}
               </div>
-              <span className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${getStatusColor(att.status)}`}>
-                {att.status}
-              </span>
-            </motion.div>
-          ))}
+            </div>
+            
+            <div className="p-6 bg-[#F5F5F7]/50 border-t border-[#E4E3E0] grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-2xl border border-[#E4E3E0]">
+                <p className="text-[10px] font-bold text-[#8E9299] uppercase tracking-widest mb-1">Keldi</p>
+                <p className="text-xl font-bold text-green-600">{attendances.filter(a => a.status === 'present').length} kun</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-[#E4E3E0]">
+                <p className="text-[10px] font-bold text-[#8E9299] uppercase tracking-widest mb-1">Kelmagan</p>
+                <p className="text-xl font-bold text-red-600">{attendances.filter(a => a.status === 'absent').length} kun</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-[#E4E3E0]">
+                <p className="text-[10px] font-bold text-[#8E9299] uppercase tracking-widest mb-1">Kechikkan</p>
+                <p className="text-xl font-bold text-orange-600">{attendances.filter(a => a.status === 'late').length} kun</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-[#E4E3E0]">
+                <p className="text-[10px] font-bold text-[#8E9299] uppercase tracking-widest mb-1">Davomat %</p>
+                <p className="text-xl font-bold text-[#141414]">
+                  {attendances.length > 0 
+                    ? Math.round((attendances.filter(a => a.status === 'present').length / attendances.length) * 100) 
+                    : 0}%
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {attendances.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12).map((att, i) => (
+              <motion.div
+                key={att.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                className="bg-white p-6 rounded-3xl border border-[#E4E3E0] shadow-sm flex items-center justify-between"
+              >
+                <div>
+                  <p className="text-xs font-mono font-bold text-[#8E9299] uppercase tracking-widest">{getCourseName(att.courseId)}</p>
+                  <h4 className="text-sm font-bold text-[#141414] mt-1">{new Date(att.date).toLocaleDateString('uz-UZ', { day: 'numeric', month: 'long', year: 'numeric' })}</h4>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${getStatusColor(att.status)}`}>
+                  {att.status === 'present' ? 'Kelgan' : att.status === 'absent' ? 'Yoʻq' : 'Kechikkan'}
+                </span>
+              </motion.div>
+            ))}
+          </div>
         </div>
       )}
     </div>
