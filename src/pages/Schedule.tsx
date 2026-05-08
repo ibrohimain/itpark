@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { firestoreService } from '../lib/firestoreService';
 import { Schedule, Course } from '../types';
-import { Plus, Calendar as CalendarIcon, Clock, MapPin, Search } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Clock, MapPin, Search, ChevronLeft, ChevronRight, FilePlus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -12,13 +12,23 @@ const SchedulePage: React.FC = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isHWModalOpen, setIsHWModalOpen] = useState(false);
   
+  // Week navigation
+  const [viewDate, setViewDate] = useState(new Date());
+
   // Form state
   const [courseId, setCourseId] = useState('');
   const [day, setDay] = useState(DAYS[0]);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [room, setRoom] = useState('');
+
+  // Homework Form
+  const [hwTitle, setHwTitle] = useState('');
+  const [hwDesc, setHwDesc] = useState('');
+  const [hwDueDate, setHwDueDate] = useState('');
+  const [selectedCourseId, setSelectedCourseId] = useState('');
 
   useEffect(() => {
     const unsubSched = firestoreService.subscribeToDocuments<Schedule>('schedules', [], (data) => {
@@ -44,6 +54,27 @@ const SchedulePage: React.FC = () => {
     resetForm();
   };
 
+  const handleDeleteSchedule = async (id: string | undefined) => {
+    if (!id) return;
+    if (window.confirm('Haqiqatan ham ushbu darsni oʻchirmoqchimisiz?')) {
+      await firestoreService.deleteDocument('schedules', id);
+    }
+  };
+
+  const handleCreateHW = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await firestoreService.addDocument('homework', {
+      courseId: selectedCourseId,
+      title: hwTitle,
+      description: hwDesc,
+      dueDate: hwDueDate,
+      staffId: profile?.uid
+    });
+    setIsHWModalOpen(false);
+    setHwTitle('');
+    setHwDesc('');
+  };
+
   const resetForm = () => {
     setCourseId('');
     setDay(DAYS[0]);
@@ -58,9 +89,39 @@ const SchedulePage: React.FC = () => {
   const teacherSchedules = schedules.filter(s => s.staffId === profile?.uid);
   const monthlyLessonsCount = teacherSchedules.length * 4;
 
-  const isPastLesson = (s: Schedule) => {
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-    const nowTime = new Date().toTimeString().slice(0, 5); // HH:mm
+  const getWeekRange = () => {
+    const d = new Date(viewDate);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); 
+    const monday = new Date(d.setDate(diff));
+    const sunday = new Date(d.setDate(diff + 6));
+    
+    return {
+      monday,
+      sunday,
+      days: Array.from({ length: 7 }, (_, i) => {
+        const date = new Date(monday);
+        date.setDate(monday.getDate() + i);
+        return date;
+      })
+    };
+  };
+
+  const weekInfo = getWeekRange();
+
+  const isPastLesson = (s: Schedule, lessonDate?: Date) => {
+    const now = new Date();
+    
+    // If we have a specific date for this week's instance
+    if (lessonDate) {
+      const [hours, minutes] = s.endTime.split(':').map(Number);
+      const lessonEnd = new Date(lessonDate);
+      lessonEnd.setHours(hours, minutes, 0, 0);
+      return now > lessonEnd;
+    }
+
+    const today = now.toLocaleDateString('en-US', { weekday: 'long' });
+    const nowTime = now.toTimeString().slice(0, 5); 
     
     const dayIndex = DAYS.indexOf(s.dayOfWeek);
     const todayIndex = DAYS.indexOf(today);
@@ -81,6 +142,27 @@ const SchedulePage: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-4">
+          <div className="flex bg-white rounded-2xl border border-[#E4E3E0] p-1 shadow-sm">
+            <button 
+              onClick={() => setViewDate(d => new Date(d.setDate(d.getDate() - 7)))}
+              className="p-2 hover:bg-[#F5F5F7] rounded-xl transition-all text-[#8E9299]"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <div className="px-4 py-2 flex items-center gap-2">
+              <CalendarIcon size={16} className="text-[#141414]" />
+              <span className="text-sm font-bold text-[#141414]">
+                {weekInfo.monday.toLocaleDateString('uz-UZ', { day: 'numeric', month: 'short' })} - {weekInfo.sunday.toLocaleDateString('uz-UZ', { day: 'numeric', month: 'short' })}
+              </span>
+            </div>
+            <button 
+              onClick={() => setViewDate(d => new Date(d.setDate(d.getDate() + 7)))}
+              className="p-2 hover:bg-[#F5F5F7] rounded-xl transition-all text-[#8E9299]"
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
+
           {isStaff && (
             <div className={`px-4 py-3 rounded-2xl border flex items-center gap-3 ${monthlyLessonsCount >= 15 ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-[#E4E3E0] text-[#141414]'}`}>
               <div className={`w-2 h-2 rounded-full ${monthlyLessonsCount >= 12 && monthlyLessonsCount <= 15 ? 'bg-green-500' : 'bg-[#E4E3E0]'}`}></div>
@@ -102,6 +184,7 @@ const SchedulePage: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
         {DAYS.map((dayName, idx) => {
+          const dayDate = weekInfo.days[idx];
           const daySchedules = schedules.filter(s => s.dayOfWeek === dayName);
           return (
             <motion.div 
@@ -113,15 +196,29 @@ const SchedulePage: React.FC = () => {
             >
               <div className="p-4 border-b border-[#E4E3E0] bg-[#F5F5F7]">
                 <h4 className="text-xs font-mono font-bold uppercase tracking-widest text-[#141414]">{dayName.slice(0, 3)}</h4>
+                <p className="text-[10px] text-[#8E9299] mt-1 font-bold">{dayDate.toLocaleDateString('uz-UZ', { day: 'numeric', month: 'short' })}</p>
               </div>
               <div className="p-3 space-y-3 flex-1 overflow-y-auto">
                 {daySchedules.length > 0 ? daySchedules.sort((a,b) => a.startTime.localeCompare(b.startTime)).map(s => {
-                  const past = isPastLesson(s);
+                  const past = isPastLesson(s, dayDate);
                   return (
                     <div key={s.id} className={`p-4 rounded-xl shadow-md group relative transition-all ${past ? 'bg-[#F5F5F7] text-[#8E9299] opacity-70' : 'bg-[#141414] text-white'}`}>
                       <div className="flex items-center justify-between mb-2">
                         <h5 className="text-xs font-bold">{getCourseName(s.courseId)}</h5>
-                        {past && <span className="text-[8px] font-mono uppercase bg-[#E4E3E0] px-1.5 py-0.5 rounded text-[#141414]">Oʻtildi</span>}
+                        <div className="flex items-center gap-1">
+                          {past && <span className="text-[8px] font-mono uppercase bg-[#E4E3E0] px-1.5 py-0.5 rounded text-[#141414]">Oʻtildi</span>}
+                          {isStaff && (
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSchedule(s.id);
+                              }}
+                              className="p-1 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="space-y-2 opacity-80">
                         <div className="flex items-center gap-2 text-[10px]">
@@ -133,6 +230,23 @@ const SchedulePage: React.FC = () => {
                           <span>{s.room}</span>
                         </div>
                       </div>
+
+                      {isStaff && !past && (
+                        <button 
+                          onClick={() => {
+                            setSelectedCourseId(s.courseId);
+                            const due = new Date(dayDate);
+                            const [h, m] = s.startTime.split(':');
+                            due.setHours(parseInt(h), parseInt(m));
+                            setHwDueDate(due.toISOString().slice(0, 16));
+                            setIsHWModalOpen(true);
+                          }}
+                          className="absolute -top-2 -right-2 bg-white text-[#141414] p-2 rounded-xl shadow-lg border border-[#E4E3E0] opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 transition-all hover:bg-[#F5F5F7]"
+                          title="Vazifa qo'shish"
+                        >
+                          <FilePlus size={14} />
+                        </button>
+                      )}
                     </div>
                   );
                 }) : (
@@ -227,6 +341,73 @@ const SchedulePage: React.FC = () => {
                     className="flex-1 bg-[#141414] text-white px-6 py-4 rounded-2xl font-bold"
                   >
                     Qoʻshish
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Homework Creation Modal */}
+      <AnimatePresence>
+        {isHWModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-8"
+            >
+              <h2 className="text-2xl font-bold text-[#141414] mb-2">Vazifa tayinlash</h2>
+              <p className="text-[#8E9299] text-sm mb-6">{getCourseName(selectedCourseId)} kursi uchun</p>
+              
+              <form onSubmit={handleCreateHW} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Sarlavha</label>
+                  <input
+                    type="text"
+                    required
+                    value={hwTitle}
+                    onChange={(e) => setHwTitle(e.target.value)}
+                    placeholder="Vazifa nomi..."
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Tavsif</label>
+                  <textarea
+                    required
+                    value={hwDesc}
+                    onChange={(e) => setHwDesc(e.target.value)}
+                    rows={4}
+                    placeholder="Vazifa bo'yicha ko'rsatmalar..."
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Topshirish muddati</label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={hwDueDate}
+                    onChange={(e) => setHwDueDate(e.target.value)}
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                  />
+                </div>
+                <div className="flex gap-4 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsHWModalOpen(false)}
+                    className="flex-1 px-6 py-4 rounded-2xl border border-[#E4E3E0] font-bold text-[#8E9299]"
+                  >
+                    Bekor qilish
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-[#141414] text-white px-6 py-4 rounded-2xl font-bold"
+                  >
+                    Tayinlash
                   </button>
                 </div>
               </form>
