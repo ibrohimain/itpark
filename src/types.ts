@@ -101,3 +101,13 @@ export interface Attendance {
   status: 'present' | 'absent' | 'late';
   markedBy: string;
 }
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  type: 'holiday' | 'event' | 'trip' | 'meeting';
+  createdBy: string;
+  createdAt: string;
+}

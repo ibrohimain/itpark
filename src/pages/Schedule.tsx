@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { firestoreService } from '../lib/firestoreService';
-import { Schedule, Course } from '../types';
-import { Plus, Calendar as CalendarIcon, Clock, MapPin, Search, ChevronLeft, ChevronRight, FilePlus, Trash2 } from 'lucide-react';
+import { Schedule, Course, CalendarEvent } from '../types';
+import { Plus, Calendar as CalendarIcon, Clock, MapPin, Search, ChevronLeft, ChevronRight, FilePlus, Trash2, Bell, Info, CalendarDays } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -10,9 +10,11 @@ const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 const SchedulePage: React.FC = () => {
   const { profile } = useAuth();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isHWModalOpen, setIsHWModalOpen] = useState(false);
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   
   // Week navigation
   const [viewDate, setViewDate] = useState(new Date());
@@ -30,14 +32,23 @@ const SchedulePage: React.FC = () => {
   const [hwDueDate, setHwDueDate] = useState('');
   const [selectedCourseId, setSelectedCourseId] = useState('');
 
+  // Event Form
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventDesc, setEventDesc] = useState('');
+  const [eventDate, setEventDate] = useState('');
+  const [eventType, setEventType] = useState<'holiday' | 'event' | 'trip' | 'meeting'>('event');
+
   useEffect(() => {
     const unsubSched = firestoreService.subscribeToDocuments<Schedule>('schedules', [], (data) => {
       setSchedules(data);
     });
+    const unsubEvents = firestoreService.subscribeToDocuments<CalendarEvent>('events', [], (data) => {
+      setEvents(data);
+    });
     const unsubCourses = firestoreService.subscribeToDocuments<Course>('courses', [], (data) => {
       setCourses(data);
     });
-    return () => { unsubSched(); unsubCourses(); };
+    return () => { unsubSched(); unsubEvents(); unsubCourses(); };
   }, []);
 
   const handleAddSchedule = async (e: React.FormEvent) => {
@@ -75,6 +86,29 @@ const SchedulePage: React.FC = () => {
     setHwDesc('');
   };
 
+  const handleCreateEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await firestoreService.addDocument('events', {
+      title: eventTitle,
+      description: eventDesc,
+      date: eventDate,
+      type: eventType,
+      createdBy: profile?.uid,
+      createdAt: new Date().toISOString()
+    });
+    setIsEventModalOpen(false);
+    setEventTitle('');
+    setEventDesc('');
+    setEventDate('');
+  };
+
+  const handleDeleteEvent = async (id: string | undefined) => {
+    if (!id) return;
+    if (window.confirm('Ushbu tadbirni oʻchirmoqchimisiz?')) {
+      await firestoreService.deleteDocument('events', id);
+    }
+  };
+
   const resetForm = () => {
     setCourseId('');
     setDay(DAYS[0]);
@@ -108,6 +142,24 @@ const SchedulePage: React.FC = () => {
   };
 
   const weekInfo = getWeekRange();
+
+  const getEventIcon = (type: string) => {
+    switch (type) {
+      case 'holiday': return <CalendarDays size={14} />;
+      case 'meeting': return <Bell size={14} />;
+      case 'trip': return <MapPin size={14} />;
+      default: return <Info size={14} />;
+    }
+  };
+
+  const getEventColor = (type: string) => {
+    switch (type) {
+      case 'holiday': return 'bg-red-500 text-white border-red-600';
+      case 'meeting': return 'bg-blue-500 text-white border-blue-600';
+      case 'trip': return 'bg-green-500 text-white border-green-600';
+      default: return 'bg-orange-500 text-white border-orange-600';
+    }
+  };
 
   const isPastLesson = (s: Schedule, lessonDate?: Date) => {
     const now = new Date();
@@ -172,6 +224,19 @@ const SchedulePage: React.FC = () => {
           
           {isStaff && (
             <button
+              onClick={() => {
+                setEventDate(new Date().toISOString().split('T')[0]);
+                setIsEventModalOpen(true);
+              }}
+              className="bg-white text-[#141414] border border-[#E4E3E0] px-6 py-3 rounded-2xl flex items-center gap-2 font-bold hover:bg-[#F5F5F7] transition-all"
+            >
+              <CalendarDays size={20} />
+              Tadbir qoʻshish
+            </button>
+          )}
+          
+          {isStaff && (
+            <button
               onClick={() => setIsModalOpen(true)}
               className="bg-[#141414] text-white px-6 py-3 rounded-2xl flex items-center gap-2 font-bold hover:scale-[1.02] active:scale-[0.98] transition-all"
             >
@@ -199,6 +264,31 @@ const SchedulePage: React.FC = () => {
                 <p className="text-[10px] text-[#8E9299] mt-1 font-bold">{dayDate.toLocaleDateString('uz-UZ', { day: 'numeric', month: 'short' })}</p>
               </div>
               <div className="p-3 space-y-3 flex-1 overflow-y-auto">
+                {/* Events for this day */}
+                {events.filter(e => e.date === dayDate.toISOString().split('T')[0]).map(event => (
+                  <div 
+                    key={event.id} 
+                    className={`p-3 rounded-xl border shadow-sm relative group ${getEventColor(event.type)}`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5 font-bold text-[10px]">
+                        {getEventIcon(event.type)}
+                        <span className="uppercase tracking-wider">{event.type === 'holiday' ? 'Dam olish' : event.type === 'trip' ? 'Sayohat' : event.type === 'meeting' ? 'Yig\'ilish' : 'Tadbir'}</span>
+                      </div>
+                      {isStaff && (
+                        <button 
+                          onClick={() => handleDeleteEvent(event.id)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-white/20 rounded"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      )}
+                    </div>
+                    <h5 className="text-[11px] font-bold leading-tight mb-1">{event.title}</h5>
+                    <p className="text-[9px] opacity-90 line-clamp-2 leading-snug">{event.description}</p>
+                  </div>
+                ))}
+
                 {daySchedules.length > 0 ? daySchedules.sort((a,b) => a.startTime.localeCompare(b.startTime)).map(s => {
                   const past = isPastLesson(s, dayDate);
                   return (
@@ -408,6 +498,86 @@ const SchedulePage: React.FC = () => {
                     className="flex-1 bg-[#141414] text-white px-6 py-4 rounded-2xl font-bold"
                   >
                     Tayinlash
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Event Creation Modal */}
+      <AnimatePresence>
+        {isEventModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-8"
+            >
+              <h2 className="text-2xl font-bold text-[#141414] mb-6">Tadbir yoki dam olish kuni</h2>
+              
+              <form onSubmit={handleCreateEvent} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Turi</label>
+                    <select
+                      value={eventType}
+                      onChange={(e) => setEventType(e.target.value as any)}
+                      className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm font-bold"
+                    >
+                      <option value="holiday">Dam olish kuni</option>
+                      <option value="event">Tadbir / E'lon</option>
+                      <option value="trip">Sayoxat</option>
+                      <option value="meeting">Yig'ilish</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Sana</label>
+                    <input
+                      type="date"
+                      required
+                      value={eventDate}
+                      onChange={(e) => setEventDate(e.target.value)}
+                      className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Sarlavha</label>
+                  <input
+                    type="text"
+                    required
+                    value={eventTitle}
+                    onChange={(e) => setEventTitle(e.target.value)}
+                    placeholder="Tadbir nomi..."
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Tavsif</label>
+                  <textarea
+                    value={eventDesc}
+                    onChange={(e) => setEventDesc(e.target.value)}
+                    rows={3}
+                    placeholder="Batafsil ma'lumot..."
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm resize-none"
+                  />
+                </div>
+                <div className="flex gap-4 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsEventModalOpen(false)}
+                    className="flex-1 px-6 py-4 rounded-2xl border border-[#E4E3E0] font-bold text-[#8E9299]"
+                  >
+                    Bekor qilish
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-[#141414] text-white px-6 py-4 rounded-2xl font-bold"
+                  >
+                    Saqlash
                   </button>
                 </div>
               </form>
