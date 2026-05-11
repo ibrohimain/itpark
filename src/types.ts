@@ -111,3 +111,16 @@ export interface CalendarEvent {
   createdBy: string;
   createdAt: string;
 }
+
+export interface Payment {
+  id: string;
+  studentId: string;
+  courseId: string;
+  amount: number;
+  date: string;
+  month: string;
+  recordedBy: string;
+  createdAt: string;
+  method: 'cash' | 'card' | 'transfer';
+  status: 'paid' | 'pending';
+}

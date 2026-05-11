@@ -83,6 +83,23 @@
         "feedback": { "type": "string" }
       },
       "required": ["homeworkId", "studentId", "content", "submittedAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Student tuition payment history.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date" },
+        "month": { "type": "string", "description": "YYYY-MM format" },
+        "recordedBy": { "type": "string" },
+        "method": { "type": "string", "enum": ["cash", "card", "transfer"] },
+        "status": { "type": "string", "enum": ["paid", "pending"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "courseId", "amount", "date", "month", "recordedBy"]
     }
   },
   "firestore": {
@@ -94,6 +111,7 @@
     "submissions": { "schema": "Submission", "description": "Student homework uploads" },
     "groups": { "schema": "Group", "description": "Student groups for courses" },
     "courseRequests": { "schema": "CourseRequest", "description": "Course enrollment requests" },
-    "notifications": { "schema": "AppNotification", "description": "User notifications" }
+    "notifications": { "schema": "AppNotification", "description": "User notifications" },
+    "payments": { "schema": "Payment", "description": "Tuition payment records" }
   }
 }

@@ -13,7 +13,8 @@ import {
   LayoutDashboard,
   Menu,
   X,
-  Trophy
+  Trophy,
+  CreditCard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -41,6 +42,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { name: 'Users', path: '/users', icon: Users, roles: ['director'] },
     { name: 'Groups', path: '/groups', icon: Users, roles: ['staff', 'director'] },
     { name: 'Ranking', path: '/ranking', icon: Trophy, roles: ['*'] },
+    { name: 'Finance', path: '/finance', icon: CreditCard, roles: ['*'] },
   ];
 
   const checkRole = (itemRoles: string[]) => {

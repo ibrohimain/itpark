@@ -85,6 +85,14 @@ service cloud.firestore {
              data.submittedAt == request.time;
     }
 
+    function isValidPayment(data) {
+      return data.keys().hasAll(['studentId', 'courseId', 'amount', 'date', 'month', 'recordedBy']) &&
+             data.studentId is string && data.courseId is string &&
+             data.amount is number && data.amount > 0 &&
+             data.date is string && data.month is string &&
+             data.recordedBy == request.auth.uid;
+    }
+
     // --- Collections ---
 
     match /users/{userId} {
@@ -153,6 +161,20 @@ service cloud.firestore {
       allow create: if isDirector() || isStaff();
       allow update: if isOwner(resource.data.userId) && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
       allow delete: if isOwner(resource.data.userId);
+    }
+
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && (isDirector() || isStaff() || isOwner(existing().studentId));
+      allow list: if isSignedIn() && (isDirector() || isStaff() || (resource != null && isOwner(resource.data.studentId)));
+      allow create: if (isDirector() || isStaff()) && isValidPayment(incoming()) &&
+                    exists(/databases/$(database)/documents/users/$(incoming().studentId)) &&
+                    exists(/databases/$(database)/documents/courses/$(incoming().courseId));
+      allow update, delete: if isDirector();
+    }
+
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow write: if isDirector() || isStaff();
     }
   }
 }

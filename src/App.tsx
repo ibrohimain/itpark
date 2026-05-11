@@ -14,6 +14,7 @@ import LessonsPage from './pages/Lessons';
 
 import GroupsPage from './pages/Groups';
 import RankingPage from './pages/Ranking';
+import FinancePage from './pages/Finance';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="/lessons" element={<ProtectedRoute><LessonsPage /></ProtectedRoute>} />
           <Route path="/groups" element={<ProtectedRoute><GroupsPage /></ProtectedRoute>} />
           <Route path="/ranking" element={<ProtectedRoute><RankingPage /></ProtectedRoute>} />
+          <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

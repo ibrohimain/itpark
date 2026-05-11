@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { firestoreService } from '../lib/firestoreService';
-import { Course, Schedule, Homework, Group } from '../types';
+import { Course, Schedule, Homework, Group, Payment } from '../types';
 import { 
   Users, 
   BookOpen, 
@@ -9,7 +9,8 @@ import {
   FileText, 
   Clock, 
   ArrowRight,
-  MapPin
+  MapPin,
+  DollarSign
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
@@ -21,6 +22,10 @@ const Dashboard: React.FC = () => {
   const [activeHomework, setActiveHomework] = useState<Homework[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [userGroups, setUserGroups] = useState<Group[]>([]);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [usersCount, setUsersCount] = useState(0);
+
+  const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
 
   useEffect(() => {
     if (profile) {
@@ -28,6 +33,13 @@ const Dashboard: React.FC = () => {
         const cs = await firestoreService.listDocuments<Course>('courses');
         setCourses(cs);
         setCoursesCount(cs.length);
+
+        if (isDirector) {
+          const payments = await firestoreService.listDocuments<Payment>('payments');
+          setTotalRevenue(payments.reduce((sum, p) => sum + p.amount, 0));
+          const users = await firestoreService.listDocuments('users');
+          setUsersCount(users.length);
+        }
 
         const groups = await firestoreService.listDocuments<Group>('groups');
         const enrolledGroups = groups.filter(g => g.studentIds.includes(profile.uid));
@@ -67,11 +79,15 @@ const Dashboard: React.FC = () => {
     }
   }, [profile]);
 
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('uz-UZ', { style: 'currency', currency: 'UZS', maximumFractionDigits: 0 }).format(val);
+  };
+
   const stats = [
     { name: 'Kurslar', value: coursesCount, icon: BookOpen, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { name: 'Xodimlar', value: 12, icon: Users, color: 'text-purple-600', bg: 'bg-purple-50' },
-    { name: 'Vazifalar', value: activeHomework.length, icon: FileText, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { name: 'Darslar', value: nextLesson ? 1 : 0, icon: Clock, color: 'text-green-600', bg: 'bg-green-50' },
+    { name: isDirector ? 'Foydalanuvchilar' : 'Guruhlar', value: isDirector ? usersCount : userGroups.length, icon: Users, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { name: isDirector ? 'Umumiy tushum' : 'Vazifalar', value: isDirector ? formatCurrency(totalRevenue) : activeHomework.length, icon: isDirector ? DollarSign : FileText, color: isDirector ? 'text-green-600' : 'text-orange-600', bg: isDirector ? 'bg-green-50' : 'bg-orange-50' },
+    { name: 'Darslar', value: nextLesson ? 1 : 0, icon: Clock, color: 'text-indigo-600', bg: 'bg-indigo-50' },
   ];
 
   return (
