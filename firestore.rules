@@ -176,5 +176,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isDirector() || isStaff();
     }
+
+    match /fineSettings/{id} {
+      allow read: if isSignedIn();
+      allow write: if isDirector() || isStaff();
+    }
   }
 }

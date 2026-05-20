@@ -12,7 +12,12 @@ import {
   Filter,
   Users as UsersIcon,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  Trash2,
+  Settings,
+  ChevronDown,
+  ChevronUp,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -35,14 +40,36 @@ const FinancePage: React.FC = () => {
   const [students, setStudents] = useState<UserProfile[]>([]);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editingAttendanceId, setEditingAttendanceId] = useState<string | null>(null);
+  const [editAttDate, setEditAttDate] = useState('');
+  const [editAttStatus, setEditAttStatus] = useState<'present' | 'absent' | 'late'>('absent');
+  const [editAttCourseId, setEditAttCourseId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'payments' | 'fines'>('payments');
+
+  // Custom expandable student state for fine rows
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
+
+  // Dynamic fine rates state
+  const [fineRates, setFineRates] = useState<{ absentFine: number; lateFine: number }>({
+    absentFine: 10000,
+    lateFine: 5000
+  });
+  const [editAbsentFine, setEditAbsentFine] = useState('10000');
+  const [editLateFine, setEditLateFine] = useState('5000');
+  const [isUpdatingRates, setIsUpdatingRates] = useState(false);
 
   // Form state
   const [studentId, setStudentId] = useState('');
   const [courseId, setCourseId] = useState('');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dueDate, setDueDate] = useState(() => {
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    return nextWeek.toISOString().split('T')[0];
+  });
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [method, setMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
 
@@ -79,11 +106,24 @@ const FinancePage: React.FC = () => {
       }
     });
 
+    const unsubFineSettings = firestoreService.subscribeToDocuments<any>('fineSettings', [], (data) => {
+      const ratesDoc = data.find(doc => doc.id === 'rates');
+      if (ratesDoc) {
+        setFineRates({
+          absentFine: Number(ratesDoc.absentFine) || 10000,
+          lateFine: Number(ratesDoc.lateFine) || 5000
+        });
+        setEditAbsentFine(String(ratesDoc.absentFine || 10000));
+        setEditLateFine(String(ratesDoc.lateFine || 5000));
+      }
+    });
+
     return () => { 
       unsubPayments(); 
       unsubCourses(); 
       unsubStudents(); 
       unsubAttendances(); 
+      unsubFineSettings();
     };
   }, [profile, isStaff]);
 
@@ -91,17 +131,27 @@ const FinancePage: React.FC = () => {
     e.preventDefault();
     if (!profile) return;
 
-    await firestoreService.addDocument('payments', {
+    const paymentData: any = {
       studentId,
       courseId,
       amount: Number(amount),
       date,
+      dueDate,
       month,
       method,
       recordedBy: profile.uid,
-      status: 'paid',
-      createdAt: new Date().toISOString()
-    });
+      status: 'paid'
+    };
+
+    if (editingPaymentId) {
+      paymentData.updatedAt = new Date().toISOString();
+      await firestoreService.updateDocument('payments', editingPaymentId, paymentData);
+      alert("Toʻlov muvaffaqiyatli yangilandi!");
+    } else {
+      paymentData.createdAt = new Date().toISOString();
+      await firestoreService.addDocument('payments', paymentData);
+      alert("Toʻlov muvaffaqiyatli qoʻshildi!");
+    }
 
     setIsModalOpen(false);
     resetForm();
@@ -112,8 +162,105 @@ const FinancePage: React.FC = () => {
     setCourseId('');
     setAmount('');
     setDate(new Date().toISOString().split('T')[0]);
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    setDueDate(nextWeek.toISOString().split('T')[0]);
     setMonth(new Date().toISOString().slice(0, 7));
     setMethod('cash');
+    setEditingPaymentId(null);
+  };
+
+  const handleEditPaymentSelect = (p: any) => {
+    setEditingPaymentId(p.id);
+    setStudentId(p.studentId);
+    setCourseId(p.courseId);
+    setAmount(String(p.amount));
+    setDate(p.date || '');
+    setDueDate(p.dueDate || '');
+    setMonth(p.month || '');
+    setMethod(p.method || 'cash');
+    setIsModalOpen(true);
+  };
+
+  const handleSaveAttendanceFine = async (id: string, originalAtt: any) => {
+    try {
+      const updatedData = {
+        ...originalAtt,
+        date: editAttDate,
+        status: editAttStatus,
+        courseId: editAttCourseId,
+        updatedAt: new Date().toISOString()
+      };
+      await firestoreService.updateDocument('attendance', id, updatedData);
+      setEditingAttendanceId(null);
+      alert("Davomat darsi / jarima muvaffaqiyatli tahrirlandi!");
+    } catch (err) {
+      console.error(err);
+      alert("Dars / jarimani tahrirlashda xatolik yuz berdi.");
+    }
+  };
+
+  const handleDeletePayment = async (payId: string) => {
+    if (!isDirector) {
+      alert("Faqat tashkilot direktori toʻlovlarni oʻchira oladi!");
+      return;
+    }
+    if (window.confirm("Ushbu toʻlov rekordini butunlay oʻchirib tashlamoqchimisiz?")) {
+      try {
+        await firestoreService.deleteDocument('payments', payId);
+      } catch (err) {
+        console.error(err);
+        alert("O'chirishda xatolik yuz berdi.");
+      }
+    }
+  };
+
+  const handleSaveRates = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isDirector && !isStaff) return;
+    setIsUpdatingRates(true);
+    try {
+      await firestoreService.setDocument('fineSettings', 'rates', {
+        absentFine: Number(editAbsentFine),
+        lateFine: Number(editLateFine),
+        updatedAt: new Date().toISOString()
+      });
+      alert("Jarima narxlari muvaffaqiyatli yangilandi!");
+    } catch (err) {
+      console.error(err);
+      alert("Narxlarni yangilashda xatolik yuz berdi.");
+    } finally {
+      setIsUpdatingRates(false);
+    }
+  };
+
+  const handleDeleteAttendanceFine = async (attendanceId: string) => {
+    if (!attendanceId) return;
+    if (window.confirm("Ushbu dars qoldirilishi/kech qolishi yo'qlama jarimasini butunlay oʻchirib tashlamoqchimisiz?")) {
+      try {
+        await firestoreService.deleteDocument('attendance', attendanceId);
+      } catch (err) {
+        console.error(err);
+        alert("Xatolik yuz berdi. O'chirishga ruxsat yo'q yoki tarmoq xatosi.");
+      }
+    }
+  };
+
+  const handleClearAllStudentFines = async (studentId: string, fullName: string) => {
+    if (window.confirm(`${fullName} talabasining barcha yo'qlama jarimalari (dars qoldirish/kech qolish) va qarzdorliklarini butunlay oʻchirib tashlamoqchimisiz?`)) {
+      try {
+        const studentFines = attendances.filter(a => a.studentId === studentId && (a.status === 'absent' || a.status === 'late'));
+        for (const f of studentFines) {
+          if (f.id) {
+            await firestoreService.deleteDocument('attendance', f.id);
+          }
+        }
+        alert("Oʻquvchining barcha yo'qlama qarzdorliklari muvaffaqiyatli o'chirildi!");
+      } catch (err) {
+        console.error(err);
+        alert("Xatolik yuz berdi.");
+      }
+    }
   };
 
   const getStudentName = (id: string) => students.find(s => s.uid === id)?.fullName || 'Nomaʼlum talaba';
@@ -124,7 +271,7 @@ const FinancePage: React.FC = () => {
   };
 
   const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
-  const totalFines = attendances.reduce((sum, a) => sum + (a.status === 'absent' ? 10000 : a.status === 'late' ? 5000 : 0), 0);
+  const totalFines = attendances.reduce((sum, a) => sum + (a.status === 'absent' ? fineRates.absentFine : a.status === 'late' ? fineRates.lateFine : 0), 0);
   
   const calculateFines = (sId: string) => {
     const studentAtts = attendances.filter(a => a.studentId === sId);
@@ -133,7 +280,7 @@ const FinancePage: React.FC = () => {
     return {
       absents,
       lates,
-      total: (absents * 10000) + (lates * 5000)
+      total: (absents * fineRates.absentFine) + (lates * fineRates.lateFine)
     };
   };
 
@@ -198,7 +345,7 @@ const FinancePage: React.FC = () => {
           )}
           {isDirector && (
             <button 
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => { resetForm(); setIsModalOpen(true); }}
               className="px-6 py-3 bg-[#141414] text-white rounded-2xl flex items-center gap-2 font-bold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-[#141414]/10"
             >
               <Plus size={18} /> Toʻlov qabul qilish
@@ -236,7 +383,7 @@ const FinancePage: React.FC = () => {
             <p className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] mb-1">Umumiy Yoʻqlama Jarimalari</p>
             <h2 className="text-3xl font-bold text-red-500">{formatCurrency(totalFines)}</h2>
             <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-red-500 bg-red-50 w-fit px-2 py-1 rounded-lg">
-              Absent (10k) & Late (5k) jarimalari yig'indisi
+              Kelmagan dars ({formatCurrency(fineRates.absentFine)}) & Kech qolish ({formatCurrency(fineRates.lateFine)}) jarimalari yig'indisi
             </div>
           </motion.div>
 
@@ -290,10 +437,10 @@ const FinancePage: React.FC = () => {
             <h2 className="text-3xl font-bold text-red-500">{formatCurrency(calculateFines(profile?.uid || '').total)}</h2>
             <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-bold">
               <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded">
-                Sariq (kelmagan) - {calculateFines(profile?.uid || '').absents} marta (10k)
+                Sariq (kelmagan) - {calculateFines(profile?.uid || '').absents} marta ({formatCurrency(fineRates.absentFine)})
               </span>
               <span className="bg-orange-50 text-orange-600 px-2 py-0.5 rounded">
-                Kech (kechikkan) - {calculateFines(profile?.uid || '').lates} marta (5k)
+                Kech (kechikkan) - {calculateFines(profile?.uid || '').lates} marta ({formatCurrency(fineRates.lateFine)})
               </span>
             </div>
           </motion.div>
@@ -347,8 +494,10 @@ const FinancePage: React.FC = () => {
                   <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Kurs</th>
                   <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Summa</th>
                   <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Toʻlangan oy</th>
-                  <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Sana</th>
+                  <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Toʻlov muddati</th>
+                  <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Toʻlangan sana</th>
                   <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Usul</th>
+                  {isDirector && <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299] text-center">Amallar</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E4E3E0]">
@@ -382,7 +531,10 @@ const FinancePage: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-8 py-5">
-                      <span className="text-[#8E9299] text-xs font-medium">{p.date}</span>
+                      <span className="text-red-600 bg-red-50 text-xs font-mono font-bold px-2.5 py-1 rounded-lg">{(p as any).dueDate || p.date || '-'}</span>
+                    </td>
+                    <td className="px-8 py-5">
+                      <span className="text-green-600 bg-green-50 text-xs font-mono font-bold px-2.5 py-1 rounded-lg">{p.date}</span>
                     </td>
                     <td className="px-8 py-5">
                       <div className="flex items-center gap-2 text-[#8E9299] text-[10px] font-bold uppercase tracking-widest">
@@ -390,10 +542,30 @@ const FinancePage: React.FC = () => {
                         {p.method === 'cash' ? 'Naqd' : p.method === 'card' ? 'Karta' : 'Oʻtkazma'}
                       </div>
                     </td>
+                    {isDirector && (
+                      <td className="px-8 py-5 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleEditPaymentSelect(p)}
+                            className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all"
+                            title="To'lovni tahrirlash"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePayment(p.id)}
+                            className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all"
+                            title="Foydalanuvchi to'lovini o'chirish"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </motion.tr>
                 )) : (
                   <tr>
-                    <td colSpan={isStaff ? 6 : 5} className="px-8 py-20 text-center">
+                    <td colSpan={isStaff ? (isDirector ? 8 : 7) : (isDirector ? 8 : 7)} className="px-8 py-20 text-center">
                       <div className="flex flex-col items-center justify-center space-y-3">
                         <div className="w-16 h-16 bg-[#F5F5F7] rounded-full flex items-center justify-center text-[#8E9299]">
                           <DollarSign size={32} />
@@ -408,117 +580,314 @@ const FinancePage: React.FC = () => {
           </div>
         ) : (
           /* Fines rendering inside sub-tab */
-          <div className="overflow-x-auto">
-            {isStaff ? (
-              <table className="w-full text-left">
-                <thead className="bg-[#F5F5F7] border-b border-[#E4E3E0]">
-                  <tr>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Talaba</th>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Dars qoldirish (10,000 UZS)</th>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Kech qolish (5,000 UZS)</th>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299] text-right">Umumiy Yoʻqlama Jarimasi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E4E3E0]">
-                  {students
-                    .filter(s => s.fullName.toLowerCase().includes(searchTerm.toLowerCase()))
-                    .map((student, i) => {
-                      const f = calculateFines(student.uid);
-                      return (
-                        <motion.tr 
-                          key={student.uid}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.02 }}
-                          className="hover:bg-[#F5F5F7]/30 transition-colors"
-                        >
-                          <td className="px-8 py-5">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-red-50 border border-red-100 flex items-center justify-center font-bold text-[10px] text-red-500">
-                                {student.fullName.charAt(0)}
-                              </div>
-                              <div>
-                                <span className="font-bold text-[#141414] text-xs block">{student.fullName}</span>
-                                <span className="text-[10px] text-[#8E9299] uppercase font-mono font-medium">{student.role}</span>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-8 py-5">
-                            <span className="font-mono font-bold text-[#141414] text-xs">
-                              {f.absents} marta ({formatCurrency(f.absents * 10000)})
-                            </span>
-                          </td>
-                          <td className="px-8 py-5">
-                            <span className="font-mono font-bold text-[#141414] text-xs">
-                              {f.lates} marta ({formatCurrency(f.lates * 5000)})
-                            </span>
-                          </td>
-                          <td className="px-8 py-5 text-right font-mono font-bold text-red-600 text-sm">
-                            {formatCurrency(f.total)}
-                          </td>
-                        </motion.tr>
-                      );
-                    })}
-                  {students.filter(s => s.fullName.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+          <div className="space-y-6">
+            {isStaff && (
+              <div className="mx-6 mt-6 p-6 bg-[#F5F5F7]/50 border border-[#E4E3E0] rounded-2xl">
+                <div className="flex items-center gap-2 text-sm font-bold text-[#141414] mb-4">
+                  <Settings size={18} className="text-[#8E9299]" />
+                  <span>Yoʻqlama Jarima Narxlarini Sozlash (Faol)</span>
+                </div>
+                <form onSubmit={handleSaveRates} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#8E9299] mb-2">Kelmagan kun uchun jarima (so'm)</label>
+                    <input 
+                      type="number"
+                      value={editAbsentFine}
+                      onChange={(e) => setEditAbsentFine(e.target.value)}
+                      className="w-full px-4 py-2 bg-white border border-[#E4E3E0] rounded-xl text-xs font-mono font-bold text-[#141414] outline-none focus:ring-2 focus:ring-[#141414]"
+                      required
+                      min={0}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#8E9299] mb-2">Kech qolgan kun uchun jarima (so'm)</label>
+                    <input 
+                      type="number"
+                      value={editLateFine}
+                      onChange={(e) => setEditLateFine(e.target.value)}
+                      className="w-full px-4 py-2 bg-white border border-[#E4E3E0] rounded-xl text-xs font-mono font-bold text-[#141414] outline-none focus:ring-2 focus:ring-[#141414]"
+                      required
+                      min={0}
+                    />
+                  </div>
+                  <button 
+                    type="submit"
+                    disabled={isUpdatingRates}
+                    className="w-full px-6 py-2.5 bg-[#141414] text-white rounded-xl text-xs font-bold hover:bg-[#3E3E3E] disabled:opacity-50 transition-all"
+                  >
+                    {isUpdatingRates ? "Saqlanmoqda..." : "Narxlarni saqlash"}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              {isStaff ? (
+                <table className="w-full text-left">
+                  <thead className="bg-[#F5F5F7] border-b border-[#E4E3E0]">
                     <tr>
-                      <td colSpan={4} className="px-8 py-20 text-center text-[#8E9299] text-sm font-medium">
-                        Talabalar topilmadi
-                      </td>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Talaba</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Kelmagan dars ({formatCurrency(fineRates.absentFine)})</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Kech qolish ({formatCurrency(fineRates.lateFine)})</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299] text-right">Umumiy Yoʻqlama Jarimasi</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299] text-center">Batafsil / Amallar</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            ) : (
-              /* Student's own jarimalar records */
-              <table className="w-full text-left">
-                <thead className="bg-[#F5F5F7] border-b border-[#E4E3E0]">
-                  <tr>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Sana</th>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Kurs</th>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Holat</th>
-                    <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Jarima miqdori</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E4E3E0]">
-                  {attendances
-                    .filter(a => a.status === 'absent' || a.status === 'late')
-                    .filter(a => getCourseName(a.courseId).toLowerCase().includes(searchTerm.toLowerCase()) || a.date.includes(searchTerm))
-                    .sort((a, b) => b.date.localeCompare(a.date))
-                    .map((a, idx) => (
-                      <tr key={a.id || idx} className="hover:bg-[#F5F5F7]/30 transition-colors">
-                        <td className="px-8 py-5 font-medium text-xs text-[#141414]">
-                          {a.date}
-                        </td>
-                        <td className="px-8 py-5 font-bold text-xs text-[#141414]">
-                          {getCourseName(a.courseId)}
-                        </td>
-                        <td className="px-8 py-5">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                            a.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
-                          }`}>
-                            {a.status === 'absent' ? 'Dars Qoldirdi' : 'Kech Qoldi'}
-                          </span>
-                        </td>
-                        <td className="px-8 py-5 font-mono font-bold text-red-600 text-xs">
-                          {formatCurrency(a.status === 'absent' ? 10000 : 5000)}
+                  </thead>
+                  <tbody className="divide-y divide-[#E4E3E0]">
+                    {students
+                      .filter(s => s.fullName.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map((student, i) => {
+                        const f = calculateFines(student.uid);
+                        const isExpanded = expandedStudentId === student.uid;
+                        const studentFinesList = attendances.filter(a => a.studentId === student.uid && (a.status === 'absent' || a.status === 'late'));
+                        return (
+                          <React.Fragment key={student.uid}>
+                            <motion.tr 
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: i * 0.02 }}
+                              className="hover:bg-[#F5F5F7]/30 transition-colors"
+                            >
+                              <td className="px-8 py-5">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-red-50 border border-red-100 flex items-center justify-center font-bold text-[10px] text-red-500">
+                                    {student.fullName.charAt(0)}
+                                  </div>
+                                  <div>
+                                    <span className="font-bold text-[#141414] text-xs block">{student.fullName}</span>
+                                    <span className="text-[10px] text-[#8E9299] uppercase font-mono font-medium">{student.role}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-8 py-5">
+                                <span className="font-mono font-bold text-[#141414] text-xs">
+                                  {f.absents} marta ({formatCurrency(f.absents * fineRates.absentFine)})
+                                </span>
+                              </td>
+                              <td className="px-8 py-5">
+                                <span className="font-mono font-bold text-[#141414] text-xs">
+                                  {f.lates} marta ({formatCurrency(f.lates * fineRates.lateFine)})
+                                </span>
+                              </td>
+                              <td className="px-8 py-5 text-right font-mono font-bold text-red-600 text-sm">
+                                {formatCurrency(f.total)}
+                              </td>
+                              <td className="px-8 py-5 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => setExpandedStudentId(isExpanded ? null : student.uid)}
+                                    className="p-1.5 border border-[#E4E3E0] hover:bg-[#F5F5F7] rounded-lg text-[#8E9299] hover:text-[#141414] transition-all flex items-center gap-1 text-[10px] font-bold"
+                                    title="Darslar bo'yicha batafsil ko'rish"
+                                  >
+                                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                    {isExpanded ? 'Yopish' : 'Koʻrish'} ({studentFinesList.length})
+                                  </button>
+                                  {studentFinesList.length > 0 && (
+                                    <button
+                                      onClick={() => handleClearAllStudentFines(student.uid, student.fullName)}
+                                      className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-all text-[10px] font-bold flex items-center gap-1"
+                                      title="Barcha jarimalarni o'chirish"
+                                    >
+                                      <Trash2 size={13} />
+                                      Tozalash
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </motion.tr>
+
+                            {isExpanded && (
+                              <tr>
+                                <td colSpan={5} className="bg-[#F5F5F7]/40 px-12 py-4">
+                                  <div className="border border-[#E4E3E0] bg-white rounded-2xl overflow-hidden shadow-sm">
+                                    <div className="p-4 bg-[#F5F5F7]/50 border-b border-[#E4E3E0] flex justify-between items-center">
+                                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8E9299]">
+                                        {student.fullName} – Jarimalar Ro'yxati
+                                      </span>
+                                      <span className="text-[10px] font-bold text-red-500 font-mono">
+                                        Jami: {formatCurrency(f.total)}
+                                      </span>
+                                    </div>
+                                    <div className="divide-y divide-[#E4E3E0]">
+                                      {studentFinesList.map((fat, fatIdx) => {
+                                        const isEditing = editingAttendanceId === fat.id;
+                                        if (isEditing) {
+                                          return (
+                                            <div key={fat.id || fatIdx} className="p-4 bg-blue-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs select-none">
+                                              <div className="flex flex-wrap items-center gap-4">
+                                                {/* Date */}
+                                                <div className="flex flex-col gap-1">
+                                                  <label className="text-[9px] font-bold text-[#8E9299] uppercase font-mono">Sana</label>
+                                                  <input 
+                                                    type="date"
+                                                    value={editAttDate}
+                                                    onChange={e => setEditAttDate(e.target.value)}
+                                                    className="px-2 py-1.5 border border-[#E4E3E0] bg-white rounded-lg font-medium text-xs text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                                                  />
+                                                </div>
+                                                
+                                                {/* Course */}
+                                                <div className="flex flex-col gap-1">
+                                                  <label className="text-[9px] font-bold text-[#8E9299] uppercase font-mono">Kurs</label>
+                                                  <select
+                                                    value={editAttCourseId}
+                                                    onChange={e => setEditAttCourseId(e.target.value)}
+                                                    className="px-2 py-1.5 border border-[#E4E3E0] bg-white rounded-lg font-medium text-xs text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                                                  >
+                                                    {courses.map(c => (
+                                                      <option key={c.id} value={c.id}>{c.name}</option>
+                                                    ))}
+                                                  </select>
+                                                </div>
+
+                                                {/* Status */}
+                                                <div className="flex flex-col gap-1">
+                                                  <label className="text-[9px] font-bold text-[#8E9299] uppercase font-mono">Holat / Jarima</label>
+                                                  <select
+                                                    value={editAttStatus}
+                                                    onChange={e => setEditAttStatus(e.target.value as any)}
+                                                    className="px-2 py-1.5 border border-[#E4E3E0] bg-white rounded-lg font-medium text-xs text-[#141414] focus:ring-1 focus:ring-[#141414] focus:outline-none"
+                                                  >
+                                                    <option value="present">Kelgan – Jarimasiz (0 UZS)</option>
+                                                    <option value="absent">Kelmagan ({formatCurrency(fineRates.absentFine)})</option>
+                                                    <option value="late">Kech qolgan ({formatCurrency(fineRates.lateFine)})</option>
+                                                  </select>
+                                                </div>
+                                              </div>
+
+                                              {/* Actions */}
+                                              <div className="flex items-center gap-2">
+                                                <button
+                                                  onClick={() => handleSaveAttendanceFine(fat.id, fat)}
+                                                  className="px-3 py-2 bg-[#141414] text-white rounded-xl text-[10px] font-bold hover:bg-[#141414]/90 transition"
+                                                >
+                                                  Saqlash
+                                                </button>
+                                                <button
+                                                  onClick={() => setEditingAttendanceId(null)}
+                                                  className="px-3 py-2 bg-white border border-[#E4E3E0] text-[#8E9299] hover:text-[#141414] rounded-xl text-[10px] font-bold hover:bg-[#F5F5F7] transition"
+                                                >
+                                                  Bekor qilish
+                                                </button>
+                                              </div>
+                                            </div>
+                                          );
+                                        }
+
+                                        return (
+                                          <div key={fat.id || fatIdx} className="p-4 flex items-center justify-between hover:bg-[#F5F5F7]/30 transition-all text-xs">
+                                            <div className="flex items-center gap-6">
+                                              <span className="font-medium text-[#141414]">{fat.date}</span>
+                                              <span className="font-bold text-[#141414] bg-[#F5F5F7] px-2.5 py-1 rounded-lg">
+                                                {getCourseName(fat.courseId)}
+                                              </span>
+                                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                                fat.status === 'absent' ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'
+                                              }`}>
+                                                {fat.status === 'absent' ? 'Kelmagan' : 'Kech qolgan'}
+                                              </span>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                              <span className="font-mono font-bold text-red-600">
+                                                +{formatCurrency(fat.status === 'absent' ? fineRates.absentFine : fineRates.lateFine)}
+                                              </span>
+                                              <div className="flex items-center gap-1.5">
+                                                <button
+                                                  onClick={() => {
+                                                    setEditingAttendanceId(fat.id);
+                                                    setEditAttDate(fat.date);
+                                                    setEditAttStatus(fat.status);
+                                                    setEditAttCourseId(fat.courseId);
+                                                  }}
+                                                  className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all"
+                                                  title="Sanani va jarima turini tahrirlash"
+                                                >
+                                                  <Edit2 size={13} />
+                                                </button>
+                                                <button
+                                                  onClick={() => handleDeleteAttendanceFine(fat.id)}
+                                                  className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all"
+                                                  title="Sana yo'qlamasini o'chirish / Jarimani bekor qilish"
+                                                >
+                                                  <Trash2 size={13} />
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                      {studentFinesList.length === 0 && (
+                                        <p className="p-4 italic text-[#8E9299] text-xs">Jarimalar mavjud emas.</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    {students.filter(s => s.fullName.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-8 py-20 text-center text-[#8E9299] text-sm font-medium">
+                          Talabalar topilmadi
                         </td>
                       </tr>
-                    ))}
-                  {attendances.filter(a => a.status === 'absent' || a.status === 'late').length === 0 && (
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                /* Student's own jarimalar records */
+                <table className="w-full text-left">
+                  <thead className="bg-[#F5F5F7] border-b border-[#E4E3E0]">
                     <tr>
-                      <td colSpan={4} className="px-8 py-20 text-center">
-                        <div className="flex flex-col items-center justify-center space-y-3">
-                          <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center text-green-600">
-                            <Plus size={32} />
-                          </div>
-                          <p className="text-green-600 text-sm font-bold">Ajoyib! Sizda hech qanday davomat jarimasi yoʻq</p>
-                        </div>
-                      </td>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Sana</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Kurs</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Holat</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Jarima miqdori</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody className="divide-y divide-[#E4E3E0]">
+                    {attendances
+                      .filter(a => a.status === 'absent' || a.status === 'late')
+                      .filter(a => getCourseName(a.courseId).toLowerCase().includes(searchTerm.toLowerCase()) || a.date.includes(searchTerm))
+                      .sort((a, b) => b.date.localeCompare(a.date))
+                      .map((a, idx) => (
+                        <tr key={a.id || idx} className="hover:bg-[#F5F5F7]/30 transition-colors">
+                          <td className="px-8 py-5 font-medium text-xs text-[#141414]">
+                            {a.date}
+                          </td>
+                          <td className="px-8 py-5 font-bold text-xs text-[#141414]">
+                            {getCourseName(a.courseId)}
+                          </td>
+                          <td className="px-8 py-5">
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
+                              a.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
+                            }`}>
+                              {a.status === 'absent' ? 'Dars Qoldirdi' : 'Kech Qoldi'}
+                            </span>
+                          </td>
+                          <td className="px-8 py-5 font-mono font-bold text-red-600 text-xs">
+                            {formatCurrency(a.status === 'absent' ? fineRates.absentFine : fineRates.lateFine)}
+                          </td>
+                        </tr>
+                      ))}
+                    {attendances.filter(a => a.status === 'absent' || a.status === 'late').length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-8 py-20 text-center">
+                          <div className="flex flex-col items-center justify-center space-y-3">
+                            <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center text-green-600">
+                              <Plus size={32} />
+                            </div>
+                            <p className="text-green-600 text-sm font-bold">Ajoyib! Sizda hech qanday davomat jarimasi yoʻq</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -537,8 +906,12 @@ const FinancePage: React.FC = () => {
                   <CreditCard size={24} />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-[#141414]">Toʻlov qabul qilish</h2>
-                  <p className="text-[#8E9299] text-sm italic">Moliyaviy operatsiyani roʻyxatdan oʻtkazish</p>
+                  <h2 className="text-2xl font-bold text-[#141414]">
+                    {editingPaymentId ? "Toʻlovni tahrirlash" : "Toʻlov qabul qilish"}
+                  </h2>
+                  <p className="text-[#8E9299] text-sm italic">
+                    {editingPaymentId ? "Toʻlov summasi va sanalarini oʻzgartirish" : "Moliyaviy operatsiyani roʻyxatdan oʻtkazish"}
+                  </p>
                 </div>
               </div>
               
@@ -582,7 +955,7 @@ const FinancePage: React.FC = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Toʻlov oyi</label>
                     <input
@@ -590,17 +963,27 @@ const FinancePage: React.FC = () => {
                       required
                       value={month}
                       onChange={(e) => setMonth(e.target.value)}
-                      className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-[#141414] transition-all"
+                      className="w-full px-4 py-3 bg-[#F5F5F7] border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#141414] transition-all"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Sana</label>
+                    <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Toʻlangan sana</label>
                     <input
                       type="date"
                       required
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
-                      className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-[#141414] transition-all"
+                      className="w-full px-4 py-3 bg-[#F5F5F7] border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#141414] transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] px-1">Toʻlov muddati</label>
+                    <input
+                      type="date"
+                      required
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className="w-full px-4 py-3 bg-[#F5F5F7] border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#141414] transition-all"
                     />
                   </div>
                 </div>

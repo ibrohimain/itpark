@@ -23,6 +23,10 @@ export interface UserProfile {
   role: UserRole;
   major?: string;
   points?: number; // For rating
+  birthYear?: number;
+  age?: number;
+  bio?: string;
+  statuses?: Array<{ id: string; text: string; createdAt: string; }>;
   createdAt: string;
   updatedAt: string;
 }
