@@ -16,10 +16,10 @@ const UsersPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
 
-  // Allow director and teachers
+  // Allow director and teachers, block students
   const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
   const isTeacher = ['ustoz', 'yoramchi ustoz', 'staff'].includes(profile?.role || '');
-  const canAccess = true;
+  const canAccess = profile && !['student', "o'quvchi", 'shogirt'].includes(profile.role);
 
   useEffect(() => {
     const unsub = firestoreService.subscribeToDocuments<UserProfile>('users', [], (data) => {

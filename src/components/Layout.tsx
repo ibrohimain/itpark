@@ -41,7 +41,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { name: 'Homework', path: '/homework', icon: FileText, roles: ['staff', 'director', 'o\'quvchi', 'student', 'shogirt'] },
     { name: 'Attendance', path: '/attendance', icon: CheckSquare, roles: ['staff', 'director'] },
     { name: 'Grades', path: '/grades', icon: GraduationCap, roles: ['staff', 'director', 'o\'quvchi', 'student', 'shogirt'] },
-    { name: 'Users', path: '/users', icon: Users, roles: ['*'] },
+    { name: 'Users', path: '/users', icon: Users, roles: ['staff', 'director'] },
     { name: 'Groups', path: '/groups', icon: Users, roles: ['staff', 'director'] },
     { name: 'Ranking', path: '/ranking', icon: Trophy, roles: ['*'] },
     { name: 'Finance', path: '/finance', icon: CreditCard, roles: ['*'] },
