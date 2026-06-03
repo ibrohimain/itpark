@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { firestoreService } from '../lib/firestoreService';
 import { Group, UserProfile, Course } from '../types';
-import { Users, Plus, Trash2, UserPlus, X, Search, CheckCircle2, UserCircle, GraduationCap, ChevronRight } from 'lucide-react';
+import { Users, Plus, Trash2, UserPlus, X, Search, CheckCircle2, UserCircle, GraduationCap, ChevronRight, Edit } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const GroupsPage: React.FC = () => {
@@ -14,6 +14,12 @@ const GroupsPage: React.FC = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [newGroup, setNewGroup] = useState({ name: '', courseId: '', teacherId: '' });
   
+  // Group editing state
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupCourseId, setEditGroupCourseId] = useState('');
+  const [editGroupTeacherId, setEditGroupTeacherId] = useState('');
+
   // Advanced Student-to-Group assignment modal state
   const [activeAssignGroup, setActiveAssignGroup] = useState<Group | null>(null);
   const [assignSearch, setAssignSearch] = useState('');
@@ -34,8 +40,15 @@ const GroupsPage: React.FC = () => {
     };
   }, []);
 
+  const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
+  const isUstoz = profile?.role === 'ustoz';
+
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isDirector) {
+      alert("Faqatgina direktor yangi guruh yarata oladi!");
+      return;
+    }
     const group: Group = {
       id: Math.random().toString(36).substr(2, 9),
       ...newGroup,
@@ -47,7 +60,33 @@ const GroupsPage: React.FC = () => {
     setNewGroup({ name: '', courseId: '', teacherId: '' });
   };
 
+  const handleSaveEditGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGroup) return;
+    if (!isDirector) {
+      alert("Faqatgina direktor guruh ma'lumotlarini tahrirlay oladi!");
+      return;
+    }
+
+    try {
+      await firestoreService.updateDocument('groups', editingGroup.id, {
+        name: editGroupName,
+        courseId: editGroupCourseId,
+        teacherId: editGroupTeacherId
+      });
+      setEditingGroup(null);
+      alert("Guruh muvaffaqiyatli tahrirlandi!");
+    } catch (err) {
+      console.error(err);
+      alert("Guruhni tahrirlashda xatolik yuz berdi.");
+    }
+  };
+
   const deleteGroup = async (id: string) => {
+    if (!isDirector) {
+      alert("Faqatgina direktor guruhlarni o'chira oladi!");
+      return;
+    }
     if (window.confirm('Guruhni barcha aʼzolari bilan birga butunlay oʻchirib tashlamoqchimisiz?')) {
       await firestoreService.deleteDocument('groups', id);
     }
@@ -56,6 +95,11 @@ const GroupsPage: React.FC = () => {
   const toggleStudentInGroup = async (groupId: string, studentId: string) => {
     const group = groups.find(g => g.id === groupId);
     if (!group) return;
+
+    if (!isDirector && group.teacherId !== profile?.uid) {
+      alert("Siz faqat o'zingizga biriktirilgan guruh a'zolarini tahrirlashingiz mumkin!");
+      return;
+    }
 
     let updatedIds: string[];
     if (group.studentIds.includes(studentId)) {
@@ -83,7 +127,13 @@ const GroupsPage: React.FC = () => {
     return <div className="text-center p-20 font-bold text-[#8E9299]">Ruxsat etilmagan</div>;
   }
 
-  const filteredGroups = groups.filter(g => 
+  const visibleGroups = groups.filter(g => {
+    if (isDirector) return true;
+    if (isUstoz) return g.teacherId === profile?.uid;
+    return true; // default fallback
+  });
+
+  const filteredGroups = visibleGroups.filter(g => 
     g.name.toLowerCase().includes(groupSearchQuery.toLowerCase()) ||
     (courses.find(c => c.id === g.courseId)?.name || '').toLowerCase().includes(groupSearchQuery.toLowerCase())
   );
@@ -109,13 +159,15 @@ const GroupsPage: React.FC = () => {
             />
           </div>
 
-          <button 
-            onClick={() => setIsAdding(true)}
-            className="bg-[#141414] text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 hover:scale-[1.01] transition-all shadow-sm"
-          >
-            <Plus size={16} />
-            Yangi Guruh
-          </button>
+          {isDirector && (
+            <button 
+              onClick={() => setIsAdding(true)}
+              className="bg-[#141414] text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 hover:scale-[1.01] transition-all shadow-sm"
+            >
+              <Plus size={16} />
+              Yangi Guruh
+            </button>
+          )}
         </div>
       </div>
 
@@ -188,6 +240,75 @@ const GroupsPage: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Editing Group Modal Form */}
+      <AnimatePresence>
+        {isDirector && editingGroup && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white p-8 rounded-[2.5rem] border border-[#E4E3E0] shadow-xl max-w-lg w-full relative"
+            >
+              <button 
+                onClick={() => setEditingGroup(null)}
+                className="absolute top-6 right-6 p-2 text-[#8E9299] hover:text-[#141414] rounded-lg"
+              >
+                <X size={18} />
+              </button>
+
+              <h3 className="font-extrabold text-xl text-[#141414] mb-4">Guruh ma&#39;lumotlarini tahrirlash</h3>
+              
+              <form onSubmit={handleSaveEditGroup} className="space-y-5">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8E9299] mb-2 font-mono">Guruh nomi</label>
+                  <input
+                    type="text"
+                    required
+                    value={editGroupName}
+                    onChange={(e) => setEditGroupName(e.target.value)}
+                    className="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent rounded-xl text-xs focus:bg-white focus:border-[#141414] focus:outline-none"
+                    placeholder="Masalan: Frontend UX-03"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8E9299] mb-2 font-mono">Biriktirilgan Kurs</label>
+                  <select
+                    required
+                    value={editGroupCourseId}
+                    onChange={(e) => setEditGroupCourseId(e.target.value)}
+                    className="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent rounded-xl text-xs focus:bg-white focus:border-[#141414] focus:outline-none"
+                  >
+                    <option value="">Kursni tanlang</option>
+                    {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8E9299] mb-2 font-mono">Mas&#39;ul Ustoz (Tahrirlash)</label>
+                  <select
+                    required
+                    value={editGroupTeacherId}
+                    onChange={(e) => setEditGroupTeacherId(e.target.value)}
+                    className="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent rounded-xl text-xs focus:bg-white focus:border-[#141414] focus:outline-none"
+                  >
+                    <option value="">Ustozni tanlang</option>
+                    {staff.map(s => <option key={s.uid} value={s.uid}>{s.fullName} ({s.role.toUpperCase()})</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button type="submit" className="flex-1 bg-[#141414] text-white py-3 rounded-xl font-bold text-xs hover:bg-[#141414]/90 transition">
+                    O&#39;zgarishlarni Saqlash
+                  </button>
+                  <button type="button" onClick={() => setEditingGroup(null)} className="px-5 py-3 bg-neutral-100 text-neutral-600 rounded-xl font-bold text-xs hover:bg-neutral-200 transition">
+                    Bekor qilish
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Main Groups Visual Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
         {filteredGroups.map(group => {
@@ -208,13 +329,29 @@ const GroupsPage: React.FC = () => {
                       </span>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => deleteGroup(group.id)} 
-                    className="text-[#8E9299] hover:text-red-600 hover:bg-red-50 p-2 rounded-xl transition"
-                    title="Guruhni o'chirish"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  {isDirector && (
+                    <div className="flex items-center gap-1">
+                      <button 
+                        onClick={() => {
+                          setEditingGroup(group);
+                          setEditGroupName(group.name);
+                          setEditGroupCourseId(group.courseId);
+                          setEditGroupTeacherId(group.teacherId);
+                        }} 
+                        className="text-[#8E9299] hover:text-blue-600 hover:bg-blue-50 p-2 rounded-xl transition"
+                        title="Guruhni tahrirlash"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button 
+                        onClick={() => deleteGroup(group.id)} 
+                        className="text-[#8E9299] hover:text-red-600 hover:bg-red-50 p-2 rounded-xl transition"
+                        title="Guruhni o'chirish"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Supervisor details */}

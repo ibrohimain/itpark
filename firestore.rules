@@ -96,14 +96,13 @@ service cloud.firestore {
     // --- Collections ---
 
     match /users/{userId} {
-      allow get: if isSignedIn() && (isOwner(userId) || isDirector() || isStaff());
-      allow list: if isSignedIn() && (isDirector() || isStaff());
+      allow get, list: if isSignedIn();
       allow create: if isSignedIn() && isOwner(userId) && isValidUser(incoming()) && (
         incoming().role == 'user' || incoming().role == 'student' || 
         (request.auth.token.email == 'direktor@gmail.com' && incoming().role == 'director')
       );
       allow update: if isSignedIn() && (
-        (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'major'])) ||
+        (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'major', 'birthYear', 'age', 'bio', 'statuses'])) ||
         isDirector() || (isStaff() && incoming().diff(existing()).affectedKeys().hasOnly(['points']))
       );
       allow delete: if isDirector();
@@ -120,8 +119,7 @@ service cloud.firestore {
     }
 
     match /attendance/{attendanceId} {
-      allow get: if isSignedIn() && (isDirector() || isStaff() || isOwner(existing().studentId));
-      allow list: if isSignedIn() && (isDirector() || isStaff() || (resource != null && isOwner(resource.data.studentId)));
+      allow get, list: if isSignedIn();
       allow create: if (isDirector() || isStaff()) && 
                     exists(/databases/$(database)/documents/courses/$(incoming().courseId)) &&
                     exists(/databases/$(database)/documents/users/$(incoming().studentId));

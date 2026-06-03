@@ -27,6 +27,7 @@ export interface UserProfile {
   age?: number;
   bio?: string;
   statuses?: Array<{ id: string; text: string; createdAt: string; }>;
+  spentBalance?: number; // Cash spent on paying off fines
   createdAt: string;
   updatedAt: string;
 }
@@ -81,6 +82,7 @@ export interface Schedule {
 export interface Homework {
   id: string;
   courseId: string;
+  groupId?: string;
   title: string;
   description: string;
   dueDate: string;
@@ -104,6 +106,7 @@ export interface Attendance {
   date: string;
   status: 'present' | 'absent' | 'late';
   markedBy: string;
+  paid?: boolean;
 }
 
 export interface CalendarEvent {

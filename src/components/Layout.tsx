@@ -14,7 +14,8 @@ import {
   Menu,
   X,
   Trophy,
-  CreditCard
+  CreditCard,
+  MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -34,12 +35,13 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['*'] },
     { name: 'Courses', path: '/courses', icon: BookOpen, roles: ['*'] },
+    { name: 'Statuses', path: '/statuses', icon: MessageSquare, roles: ['*'] },
     { name: 'Lessons', path: '/lessons', icon: FileText, roles: ['staff', 'director', 'o\'quvchi', 'student', 'shogirt'] },
     { name: 'Schedule', path: '/schedule', icon: Calendar, roles: ['*'] },
     { name: 'Homework', path: '/homework', icon: FileText, roles: ['staff', 'director', 'o\'quvchi', 'student', 'shogirt'] },
     { name: 'Attendance', path: '/attendance', icon: CheckSquare, roles: ['staff', 'director'] },
     { name: 'Grades', path: '/grades', icon: GraduationCap, roles: ['staff', 'director', 'o\'quvchi', 'student', 'shogirt'] },
-    { name: 'Users', path: '/users', icon: Users, roles: ['director'] },
+    { name: 'Users', path: '/users', icon: Users, roles: ['*'] },
     { name: 'Groups', path: '/groups', icon: Users, roles: ['staff', 'director'] },
     { name: 'Ranking', path: '/ranking', icon: Trophy, roles: ['*'] },
     { name: 'Finance', path: '/finance', icon: CreditCard, roles: ['*'] },

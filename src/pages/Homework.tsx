@@ -15,6 +15,7 @@ const HomeworkPage: React.FC = () => {
 
   // Form state
   const [courseId, setCourseId] = useState('');
+  const [groupId, setGroupId] = useState('');
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -39,10 +40,14 @@ const HomeworkPage: React.FC = () => {
     let unsubSub = () => {};
 
     if (profile) {
-      if (!isStaff) {
-        unsubGroups = firestoreService.subscribeToDocuments<Group>('groups', [], (data) => {
+      unsubGroups = firestoreService.subscribeToDocuments<Group>('groups', [], (data) => {
+        if (isStaff) {
+          setUserGroups(data);
+        } else {
           setUserGroups(data.filter(g => g.studentIds.includes(profile.uid)));
-        });
+        }
+      });
+      if (!isStaff) {
         unsubSub = firestoreService.subscribeToDocuments<Submission>('submissions', [{ field: 'studentId', operator: '==', value: profile.uid }], setSubmissions);
       }
     }
@@ -59,6 +64,7 @@ const HomeworkPage: React.FC = () => {
     e.preventDefault();
     await firestoreService.addDocument('homework', {
       courseId,
+      groupId,
       title,
       description: desc,
       dueDate,
@@ -83,6 +89,7 @@ const HomeworkPage: React.FC = () => {
 
   const resetForm = () => {
     setCourseId('');
+    setGroupId('');
     setTitle('');
     setDesc('');
     setDueDate('');
@@ -99,7 +106,7 @@ const HomeworkPage: React.FC = () => {
   
   const filteredHomeworks = homeworks.filter(hw => {
     if (isStaff) return true;
-    return userGroups.some(g => g.courseId === hw.courseId);
+    return userGroups.some(g => g.id === hw.groupId || (!hw.groupId && g.courseId === hw.courseId));
   });
 
   const handleDeleteHW = async (id: string) => {
@@ -216,15 +223,23 @@ const HomeworkPage: React.FC = () => {
               <h2 className="text-2xl font-bold text-[#141414] mb-6">Yangi vazifa yaratish</h2>
               <form onSubmit={handleCreateHW} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Kurs</label>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-[#8E9299] mb-2 px-1">Guruh (Maxsus guruh uchun)</label>
                   <select
                     required
-                    value={courseId}
-                    onChange={(e) => setCourseId(e.target.value)}
-                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
+                    value={groupId}
+                    onChange={(e) => {
+                      const selectedGroup = userGroups.find(g => g.id === e.target.value);
+                      setGroupId(e.target.value);
+                      if (selectedGroup) {
+                        setCourseId(selectedGroup.courseId);
+                      }
+                    }}
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm font-semibold"
                   >
-                    <option value="">Kursni tanlang...</option>
-                    {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    <option value="">Guruhni tanlang...</option>
+                    {userGroups.map(g => (
+                      <option key={g.id} value={g.id}>{g.name} ({getCourseName(g.courseId)})</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -278,21 +293,40 @@ const HomeworkPage: React.FC = () => {
               className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-8"
             >
               <h2 className="text-2xl font-bold text-[#141414] mb-2">{activeHW?.title}</h2>
-              <p className="text-[#8E9299] text-sm mb-6">Vazifa yechimini/linkini quyida yozib qoldiring</p>
+              <p className="text-[#8E9299] text-sm mb-5">
+                Vazifani topshirish uchun quyidagi Telegram guruhiga o&#39;tib topshiring:
+              </p>
+              
+              <div className="bg-[#EBF7FF] border border-[#C6E6FF] p-5 rounded-2xl text-xs space-y-3 mb-6">
+                <p className="text-[#0D548C] leading-relaxed font-bold">
+                  Mobil dasturlash bo&#39;yicha barcha uyga vazifalar ushbu maxsus guruhda tekshiriladi va baholanadi:
+                </p>
+                <a 
+                  href="https://t.me/+6t-4H5-3Rlw0ZmM6" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 justify-center w-full px-5 py-3.5 bg-[#0088cc] hover:bg-[#007bbf] text-white rounded-xl font-bold font-mono tracking-wider text-xs transition-colors"
+                >
+                  Telegram guruhga o'tish ✈️
+                </a>
+              </div>
+
+              <p className="text-[#8E9299] text-xs mb-3 font-semibold">Tizimda topshirganlikni tasdiqlsh uchun sharh / havola qoldiring:</p>
+
               <form onSubmit={handleSubmitHW} className="space-y-4">
                 <div>
                   <textarea
                     required
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
-                    rows={6}
-                    placeholder="Vazifa mazmuni yoki Github linki..."
-                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm resize-none"
+                    rows={4}
+                    placeholder="Masalan, 'Telegram guruhida topshirildi' deb tasdiqlang yoki havola qoldiring..."
+                    className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm resize-none font-medium"
                   />
                 </div>
-                <div className="flex gap-4 pt-4">
+                <div className="flex gap-4 pt-2">
                   <button type="button" onClick={() => setIsSubmitModalOpen(false)} className="flex-1 px-6 py-4 rounded-2xl border border-[#E4E3E0] font-bold text-[#8E9299]">Bekor qilish</button>
-                  <button type="submit" className="flex-1 bg-[#141414] text-white px-6 py-4 rounded-2xl font-bold">Yuborish</button>
+                  <button type="submit" className="flex-1 bg-[#141414] text-white px-6 py-4 rounded-2xl font-bold">Yuborish va Tasdiqlash</button>
                 </div>
               </form>
             </motion.div>

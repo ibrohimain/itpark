@@ -46,6 +46,7 @@ const Dashboard: React.FC = () => {
   }>({ absents: 0, lates: 0, total: 0 });
 
   const [pointsDeduction, setPointsDeduction] = useState(0);
+  const [presentDays, setPresentDays] = useState(0);
 
   // Profile editing state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -55,12 +56,19 @@ const Dashboard: React.FC = () => {
   const [bioIn, setBioIn] = useState('');
   const [newStatus, setNewStatus] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  
+  // Status editing states
+  const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
 
   const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
   const netPoints = Math.max(0, (profile?.points || 0) - pointsDeduction);
 
   useEffect(() => {
+    let unsubUsers = () => {};
     if (profile) {
+      unsubUsers = firestoreService.subscribeToDocuments<UserProfile>('users', [], setAllUsers);
       setFullNameIn(profile.fullName || '');
       setBirthYearIn(profile.birthYear ? String(profile.birthYear) : '');
       setAgeIn(profile.age ? String(profile.age) : '');
@@ -115,7 +123,8 @@ const Dashboard: React.FC = () => {
         // Fetch user personal fines
         try {
           const atts = await firestoreService.listDocuments<any>('attendance');
-          const personalAtts = atts.filter(a => a.studentId === profile.uid && (a.status === 'absent' || a.status === 'late'));
+          const studentAllAtts = atts.filter(a => a.studentId === profile.uid);
+          const personalAtts = studentAllAtts.filter(a => (a.status === 'absent' || a.status === 'late'));
           
           const settings = await firestoreService.listDocuments<any>('fineSettings');
           const ratesDoc = settings.find(doc => doc.id === 'rates');
@@ -124,6 +133,8 @@ const Dashboard: React.FC = () => {
 
           const absents = personalAtts.filter(a => a.status === 'absent').length;
           const lates = personalAtts.filter(a => a.status === 'late').length;
+          const presents = studentAllAtts.filter(a => a.status === 'present').length;
+          setPresentDays(presents);
           
           setStudentFinesSummary({
             absents,
@@ -142,6 +153,9 @@ const Dashboard: React.FC = () => {
       };
       fetchData();
     }
+    return () => {
+      unsubUsers();
+    };
   }, [profile, isDirector]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
@@ -166,6 +180,28 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // Aggregate and sort statuses from all users (micro-blog style feed)
+  const latestStatuses = React.useMemo(() => {
+    const list: { id: string; text: string; createdAt: string; user: { uid: string; fullName: string; role: string } }[] = [];
+    allUsers.forEach(u => {
+      if (u.statuses && Array.isArray(u.statuses)) {
+        u.statuses.forEach(st => {
+          list.push({
+            id: st.id,
+            text: st.text,
+            createdAt: st.createdAt || new Date().toISOString(),
+            user: {
+              uid: u.uid,
+              fullName: u.fullName,
+              role: u.role
+            }
+          });
+        });
+      }
+    });
+    return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 15);
+  }, [allUsers]);
+
   const handlePublishStatus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !newStatus.trim()) return;
@@ -186,18 +222,59 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleDeleteStatus = async (statusId: string) => {
+  const handleDeleteStatus = async (authorUid: string, statusId: string) => {
     if (!profile) return;
-    if (window.confirm("Haqiqatan ham ushbu statusni o'chirib tashlamoqchimisiz?")) {
+    const isOwner = profile.uid === authorUid;
+    const isPrivileged = profile.role === 'director' || profile.role === 'direktor o\'rin bosari';
+
+    if (!isOwner && !isPrivileged) {
+      alert("Siz faqatgina o'zingiz yozgan statuslarni o'chira olasiz!");
+      return;
+    }
+
+    if (window.confirm("Statusni oʻchirmoqchimisiz?")) {
       try {
-        const updatedStatuses = (profile.statuses || []).filter(s => s.id !== statusId);
-        await firestoreService.updateDocument('users', profile.uid, {
+        const targetUser = allUsers.find(u => u.uid === authorUid);
+        if (!targetUser) return;
+        const updatedStatuses = (targetUser.statuses || []).filter(s => s.id !== statusId);
+        await firestoreService.updateDocument('users', authorUid, {
           statuses: updatedStatuses,
           updatedAt: new Date().toISOString()
         });
       } catch (err) {
         console.error(err);
       }
+    }
+  };
+
+  const handleSaveEditStatus = async (e: React.FormEvent, authorUid: string, statusId: string) => {
+    e.preventDefault();
+    if (!profile || !editingText.trim()) return;
+    try {
+      const targetUser = allUsers.find(u => u.uid === authorUid);
+      if (!targetUser) return;
+      
+      const updatedStatuses = (targetUser.statuses || []).map(s => {
+        if (s.id === statusId) {
+          return {
+            ...s,
+            text: editingText.trim(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return s;
+      });
+
+      await firestoreService.updateDocument('users', authorUid, {
+        statuses: updatedStatuses,
+        updatedAt: new Date().toISOString()
+      });
+      setEditingStatusId(null);
+      setEditingText('');
+      alert("Status muvaffaqiyatli tahrirlandi!");
+    } catch (err) {
+      console.error(err);
+      alert("Xatolik yuz berdi.");
     }
   };
 
@@ -228,9 +305,17 @@ const Dashboard: React.FC = () => {
             Boshqaruv Paneli
           </motion.h1>
         </div>
-        <div className="text-xs font-mono text-emerald-600 bg-emerald-50 border border-emerald-100 px-4 py-2.5 rounded-2xl font-bold flex items-center gap-1.5 shadow-sm">
-          <Sparkles size={14} className="animate-pulse" />
-          Hisob: {netPoints * 20} UZS (25 ball = 500 UZS)
+        <div 
+          className="text-xs font-mono text-emerald-600 bg-emerald-50 border border-emerald-100 px-4 py-2.5 rounded-2xl font-bold flex flex-col items-end shadow-sm"
+          title="Ballar: 20 so'm/ball, Davomat: +300 so'm/kun, 40-ballik bonus: +1000 so'm"
+        >
+          <div className="flex items-center gap-1.5 font-black text-emerald-700">
+            <Sparkles size={14} className="animate-pulse" />
+            Umumiy balans: {new Intl.NumberFormat('uz-UZ', { style: 'currency', currency: 'UZS', maximumFractionDigits: 0 }).format(
+              Math.max(0, (netPoints * 20) + (presentDays * 300) + (new Date().toISOString() >= '2026-06-03' ? Math.floor(netPoints / 40) * 1000 : 0) - (profile?.spentBalance || 0))
+            )} UZS
+          </div>
+          <span className="text-[9px] text-[#8E9299] mt-0.5 font-medium">Batafsil ma'lumotni 'Ranking' (Reyting) bo'limida ko'ring</span>
         </div>
       </header>
 
@@ -420,32 +505,97 @@ const Dashboard: React.FC = () => {
               </button>
             </form>
 
-            <div className="space-y-3 font-sans max-h-72 overflow-y-auto pr-1">
-              {profile?.statuses && profile.statuses.length > 0 ? (
-                profile.statuses.map((entry) => (
-                  <motion.div 
-                    key={entry.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="p-3.5 bg-neutral-50 border border-neutral-100 rounded-xl relative group shadow-sm text-xs"
-                  >
-                    <p className="text-[#141414] leading-relaxed pr-6">{entry.text}</p>
-                    <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-[#F5F5F7]">
-                      <span className="text-[9px] font-mono text-[#8E9299]">
-                        {new Date(entry.createdAt).toLocaleDateString('uz-UZ', { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      <button 
-                        onClick={() => handleDeleteStatus(entry.id)}
-                        className="text-red-500 hover:text-red-700 p-1 opacity-0 group-hover:opacity-100 transition-all"
-                        title="Statusni o'chirish"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </motion.div>
-                ))
+            <div className="space-y-3 font-sans max-h-[19rem] overflow-y-auto pr-1">
+              {latestStatuses.length > 0 ? (
+                latestStatuses.map((entry) => {
+                  const roleColors: Record<string, string> = {
+                    director: 'bg-red-50 text-red-700 border-red-100',
+                    'direktor o\'rin bosari': 'bg-red-50 text-red-700 border-red-100',
+                    ustoz: 'bg-blue-50 text-blue-700 border-blue-100',
+                    staff: 'bg-purple-50 text-purple-700 border-purple-100'
+                  };
+                  const badgeStyle = roleColors[entry.user.role] || 'bg-amber-50 text-amber-800 border-amber-100';
+
+                  return (
+                    <motion.div 
+                      key={entry.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="p-3.5 bg-neutral-50 border border-neutral-100 rounded-xl relative group shadow-sm text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-extrabold text-[#141414] truncate">{entry.user.fullName}</span>
+                          <span className={`text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border font-mono font-bold shrink-0 ${badgeStyle}`}>
+                            {entry.user.role || 'Talaba'}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {editingStatusId === entry.id ? (
+                        <form onSubmit={(e) => handleSaveEditStatus(e, entry.user.uid, entry.id)} className="space-y-2 mt-2">
+                          <textarea
+                            required
+                            value={editingText}
+                            onChange={(e) => setEditingText(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-[#141414]"
+                            rows={2}
+                          />
+                          <div className="flex gap-1.5 justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingStatusId(null);
+                                setEditingText('');
+                              }}
+                              className="px-2.5 py-1 bg-neutral-100 hover:bg-neutral-200 text-[#8E9299] rounded-lg text-[9px] font-bold transition-all"
+                            >
+                              Bekor qilish
+                            </button>
+                            <button
+                              type="submit"
+                              className="px-2.5 py-1 bg-[#141414] hover:bg-neutral-800 text-white rounded-lg text-[9px] font-bold transition-all"
+                            >
+                              Saqlash
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <p className="text-[#333333] leading-relaxed pr-6">{entry.text}</p>
+                          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-[#F5F5F7]">
+                            <span className="text-[9px] font-mono text-[#8E9299]">
+                              {new Date(entry.createdAt).toLocaleDateString('uz-UZ', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {(profile?.uid === entry.user.uid || isDirector) && (
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                <button 
+                                  onClick={() => {
+                                    setEditingStatusId(entry.id);
+                                    setEditingText(entry.text);
+                                  }}
+                                  className="text-blue-500 hover:text-blue-700 p-1 font-semibold"
+                                  title="Tahrirlash"
+                                >
+                                  <Edit size={11} />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteStatus(entry.user.uid, entry.id)}
+                                  className="text-red-500 hover:text-red-700 p-1 font-semibold"
+                                  title="Statusni o'chirish"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </motion.div>
+                  );
+                })
               ) : (
-                <p className="text-center text-[#8E9299] text-xs italic py-4">Siz hali biror status nashr qilmadingiz.</p>
+                <p className="text-center text-[#8E9299] text-xs italic py-4">Hali hech kim status nashr qilmadi.</p>
               )}
             </div>
           </div>

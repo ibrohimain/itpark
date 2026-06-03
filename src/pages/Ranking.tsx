@@ -35,35 +35,76 @@ const RankingPage: React.FC = () => {
   // Is director or supervisor
   const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
 
-  // Calculate student profiles with actual deductions
-  const renderedStudents = users.map(student => {
+  const isLastDayOfMonth = () => {
+    const today = new Date();
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    return tomorrow.getDate() === 1;
+  };
+
+  const isTodayLastDay = isLastDayOfMonth();
+
+  // First calculate base student metrics to sort them cleanly
+  const sortedBase = users.map(student => {
     const studentAtts = attendances.filter(a => a.studentId === student.uid);
+    const unpaidAtts = studentAtts.filter(a => !a.paid);
     
     // Penalties (points deduction -5 and -3) start on 2026-05-21 and won't affect earlier dates
-    const penaltyAtts = studentAtts.filter(a => a.date >= '2026-05-21');
+    const penaltyAtts = unpaidAtts.filter(a => a.date >= '2026-05-21');
     const penaltyAbsents = penaltyAtts.filter(a => a.status === 'absent').length;
     const penaltyLates = penaltyAtts.filter(a => a.status === 'late').length;
 
-    const absents = studentAtts.filter(a => a.status === 'absent').length;
-    const lates = studentAtts.filter(a => a.status === 'late').length;
+    const absents = studentAtts.filter(a => a.status === 'absent' && !a.paid).length;
+    const lates = studentAtts.filter(a => a.status === 'late' && !a.paid).length;
+    const presents = studentAtts.filter(a => a.status === 'present').length;
 
     const deductionPoints = (penaltyAbsents * 5) + (penaltyLates * 3);
     const earnedPoints = student.points || 0;
     const netPoints = Math.max(0, earnedPoints - deductionPoints);
-    const cashValue = netPoints * 20; // 25 points = 500 UZS => 1 point = 20 UZS
 
     return {
       ...student,
       absents,
       lates,
+      presents,
       penaltyAbsents,
       penaltyLates,
       deductionPoints,
       earnedPoints,
-      netPoints,
-      cashValue
+      netPoints
     };
   }).sort((a, b) => b.netPoints - a.netPoints);
+
+  // Now process final student metrics with user financial rules: 300 UZS/day present, 1000 UZS/40 points, and 10000 UZS 1st place champion bonus
+  const renderedStudents = sortedBase.map((u, index) => {
+    const isFirstPlace = index === 0 && u.netPoints > 0;
+    
+    // 1. 300 UZS daily bonus for attending class on-time (presents)
+    const attendanceCash = u.presents * 300;
+    
+    // 2. 1000 UZS bonus per each 40 earned points starts on 03.06.2026
+    const IS_BONUS_ACTIVE = new Date().toISOString() >= '2026-06-03';
+    const pointBonusCash = IS_BONUS_ACTIVE ? (Math.floor(u.netPoints / 40) * 1000) : 0;
+    
+    // 3. 10000 UZS monthly leading top spot bonus (Only on the last day of the month)
+    const leaderBonusCash = (isFirstPlace && isTodayLastDay) ? 10000 : 0;
+    
+    // Base standard rate: each remaining net point is transformed to 20 UZS
+    const basePointsCash = u.netPoints * 20;
+
+    // Net cash balance is (earned rewards) - (spent cash on fines)
+    const rawCash = basePointsCash + attendanceCash + pointBonusCash + leaderBonusCash;
+    const cashValue = Math.max(0, rawCash - (u.spentBalance || 0));
+
+    return {
+      ...u,
+      isFirstPlace,
+      attendanceCash,
+      pointBonusCash,
+      leaderBonusCash,
+      basePointsCash,
+      cashValue
+    };
+  });
 
   const filteredStudents = renderedStudents.filter(u =>
     u.fullName.toLowerCase().includes(search.toLowerCase()) ||
@@ -375,14 +416,31 @@ const RankingPage: React.FC = () => {
                       </td>
 
                       {/* Cash Reward Value */}
-                      <td className="px-8 py-5 text-right">
-                        <div className="inline-flex flex-col items-end">
-                          <span className="text-sm font-extrabold font-mono text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-xl">
+                      <td className="px-8 py-5 text-right font-sans">
+                        <div className="inline-flex flex-col items-end space-y-1">
+                          <span className="text-sm font-black font-mono text-emerald-600 bg-emerald-50 border border-emerald-100 px-3.5 py-1.5 rounded-2xl block shadow-sm text-nowrap">
                             {formatCurrency(u.cashValue)}
                           </span>
-                          <span className="text-[9px] text-stone-400 font-mono mt-0.5 block">
-                            25 ball = 500 UZS mezoni
-                          </span>
+                          <div className="text-[10px] text-[#8E9299] font-mono text-right bg-neutral-50/80 border border-neutral-100 p-2.5 rounded-xl mt-1 space-y-0.5 pointer-events-none leading-normal text-xs w-72 max-w-xs shadow-sm">
+                            <div className="flex justify-between">
+                              <span>Net ball bonusi (20 so'm/ball):</span>
+                              <span className="font-bold text-neutral-700">{formatCurrency(u.basePointsCash)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Vaqtida kelgani (+300 so'm/kun):</span>
+                              <span className="font-bold text-blue-600">+{formatCurrency(u.attendanceCash)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>40-ballik bonus (+1000 so'm):</span>
+                              <span className="font-bold text-purple-600">+{formatCurrency(u.pointBonusCash)}</span>
+                            </div>
+                            {u.leaderBonusCash > 0 && (
+                              <div className="flex justify-between text-amber-600 font-bold border-t border-amber-200 mt-1 pt-1">
+                                <span>1-o'rin grand bonusi:</span>
+                                <span>+10,000 UZS 🏆</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>

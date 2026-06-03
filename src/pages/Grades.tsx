@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { firestoreService } from '../lib/firestoreService';
 import { Group, UserProfile } from '../types';
-import { Star, Save, Users, ChevronRight, Award, Trophy, Bookmark, Gift, Sparkles, CheckCircle, GraduationCap } from 'lucide-react';
+import { Star, Save, Users, ChevronRight, Award, Trophy, Bookmark, Gift, Sparkles, CheckCircle, GraduationCap, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const GradesPage: React.FC = () => {
@@ -11,9 +11,12 @@ const GradesPage: React.FC = () => {
   const [students, setStudents] = useState<UserProfile[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   
-  // Two-tiered grading state: Standard grades (1-5) & Bonus grades (1-5)
-  const [standardGrades, setStandardGrades] = useState<Record<string, number>>({});
-  const [bonusGrades, setBonusGrades] = useState<Record<string, number>>({});
+  // Three-pronged grading states: Homework, Attendance/Participation, Q&A (each 0 - 5 stars)
+  const [homeworkGrades, setHomeworkGrades] = useState<Record<string, number>>({});
+  const [attendanceGrades, setAttendanceGrades] = useState<Record<string, number>>({});
+  const [qaGrades, setQaGrades] = useState<Record<string, number>>({});
+  const [comments, setComments] = useState<Record<string, string>>({});
+  
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -25,108 +28,159 @@ const GradesPage: React.FC = () => {
     };
   }, []);
 
-  const selectedGroup = groups.find(g => g.id === selectedGroupId);
+  const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
+  const isUstoz = profile?.role === 'ustoz';
+
+  const visibleGroups = React.useMemo(() => {
+    return groups.filter(g => {
+      if (isDirector) return true;
+      if (isUstoz) return g.teacherId === profile?.uid;
+      if (profile?.role === 'ustoz' || profile?.role === 'yoramchi ustoz') {
+        return g.teacherId === profile?.uid;
+      }
+      return true;
+    });
+  }, [groups, profile, isDirector, isUstoz]);
+
+  useEffect(() => {
+    if (visibleGroups.length > 0 && !selectedGroupId) {
+      setSelectedGroupId(visibleGroups[0].id);
+    }
+  }, [visibleGroups, selectedGroupId]);
+
+  const selectedGroup = visibleGroups.find(g => g.id === selectedGroupId);
   const groupStudents = students.filter(s => selectedGroup?.studentIds.includes(s.uid));
 
-  const handleStandardGradeChange = (studentId: string, stars: number) => {
-    // If double clicking the same star, reset it to 0
-    setStandardGrades(prev => ({
+  const handleHomeworkGradeChange = (studentId: string, stars: number) => {
+    setHomeworkGrades(prev => ({
       ...prev,
       [studentId]: prev[studentId] === stars ? 0 : stars
     }));
   };
 
-  const handleBonusGradeChange = (studentId: string, stars: number) => {
-    // If double clicking the same star, reset it to 0
-    setBonusGrades(prev => ({
+  const handleAttendanceGradeChange = (studentId: string, stars: number) => {
+    setAttendanceGrades(prev => ({
       ...prev,
       [studentId]: prev[studentId] === stars ? 0 : stars
+    }));
+  };
+
+  const handleQaGradeChange = (studentId: string, stars: number) => {
+    setQaGrades(prev => ({
+      ...prev,
+      [studentId]: prev[studentId] === stars ? 0 : stars
+    }));
+  };
+
+  const handleCommentChange = (studentId: string, comment: string) => {
+    setComments(prev => ({
+      ...prev,
+      [studentId]: comment
     }));
   };
 
   const saveGrades = async () => {
     setIsSaving(true);
     try {
-      // Calculate list of students to update
+      // Collect students with updates
       const studentIdsToUpdate = Array.from(new Set([
-        ...Object.keys(standardGrades),
-        ...Object.keys(bonusGrades)
+        ...Object.keys(homeworkGrades),
+        ...Object.keys(attendanceGrades),
+        ...Object.keys(qaGrades),
+        ...Object.keys(comments)
       ]));
 
       for (const studentId of studentIdsToUpdate) {
         const student = students.find(s => s.uid === studentId);
         if (student) {
-          const sStars = standardGrades[studentId] || 0;
-          const bStars = bonusGrades[studentId] || 0;
-          const totalEarnedToday = sStars + bStars;
+          const hwStars = homeworkGrades[studentId] || 0;
+          const attStars = attendanceGrades[studentId] || 0;
+          const qaStars = qaGrades[studentId] || 0;
+          const totalEarnedToday = hwStars + attStars + qaStars;
+          const userComment = comments[studentId] || "Darsda faol ishtirok etdingiz!";
 
-          if (totalEarnedToday > 0) {
+          if (totalEarnedToday > 0 || comments[studentId]) {
             const currentPoints = student.points || 0;
             const finalPoints = currentPoints + totalEarnedToday;
 
+            // Only update points if there's an increase
             await firestoreService.updateDocument('users', studentId, {
               points: finalPoints,
               updatedAt: new Date().toISOString()
             });
 
-            // Send notification details
+            // Send rich detailed notification to the student
+            const message = `${selectedGroup?.name} darsidan bugungi natijangiz:
+• Uyga vazifa: ${hwStars} ball ⭐️
+• Darsda qatnashgani: ${attStars} ball ⭐️
+• Savol-javob: ${qaStars} ball ⭐️
+Jami bugun to'plangan ballar: +${totalEarnedToday} ball!
+
+O'qituvchi sharhi / izohi:
+"${userComment}"
+
+Jami umumiy reyting balingiz: ${finalPoints} ball. Baraka toping!`;
+
             await firestoreService.sendNotification(
               studentId, 
-              'Yangi baholar qabul qilindi! ⭐️', 
-              `${selectedGroup?.name} darsidan bugun ${sStars} ball faollik va +${bStars} ball bonus yutib oldingiz! Umumiy reyting balingiz: ${finalPoints} ball`, 
+              'Bugungi dars ballari & Sharh! ⭐️', 
+              message, 
               'grade'
             );
           }
         }
       }
 
-      setStandardGrades({});
-      setBonusGrades({});
-      alert("Baholar dars bo'yicha muvaffaqiyatli saqlandi va barcha talabalarga bildirishnomalar jo'natildi!");
+      setHomeworkGrades({});
+      setAttendanceGrades({});
+      setQaGrades({});
+      setComments({});
+      alert("Kunlik baholar, izohlari bilan muvaffaqiyatli saqlandi va barcha o'quvchilarga xabar bo'lib jo'natildi!");
     } catch (err) {
       console.error(err);
-      alert("Xatolik yuz berdi");
+      alert("Baholarni saqlashda xatolik yuz berdi");
     } finally {
       setIsSaving(false);
     }
   };
 
   const isStaff = profile?.role === 'director' || 
-    ['ustoz', 'yoramchi ustoz', 'direktor o\'rin bosari', 'staff'].includes(profile?.role || '');
+    ['ustoz', 'yoramchi ustoz', 'direktor o\'rin bosari', 'dasturchi', 'mobilograf', 'backent', 'frontend', 'dizayner', 'xodim III darajali', 'xodim II darajali', 'xodim I darajali', 'staff'].includes(profile?.role || '');
 
   if (!isStaff) {
     return (
       <div className="space-y-8">
         <div className="bg-white p-12 rounded-3xl border border-[#E4E3E0] text-center max-w-2xl mx-auto space-y-4 shadow-sm">
-          <GraduationCap size={48} className="text-yellow-500 mx-auto" />
-          <h1 className="text-2xl font-bold text-[#141414]">Talaba Baholar Tizimi</h1>
+          <GraduationCap size={48} className="text-yellow-500 mx-auto animate-bounce" />
+          <h1 className="text-2xl font-bold text-[#141414]">Mening Baholarim</h1>
           <p className="text-[#8E9299] text-sm leading-relaxed">
-            Sizning dars jarayonida to&#39;plagan ballaringiz, yulduzlaringiz va amaliy davomat penalty jarimalaringiz real-vaqt rejimida hisoblab chiqilib, <strong className="text-[#141414]">Reyting</strong> sahifasida unifikatsiyalangan balans shaklida aks etib boriladi.
+            Har bir darsda olgan ballaringiz uyga vazifa (max 5 ball), darsda qatnashgani (max 5 ball) va savol-javob (max 5 ball) uchun mukofotlanadi. Dars oxirida ustozlaringiz qo&#39;ygan izohlari to&#39;g&#39;ridan-to&#39;g&#39;ri profil bildirishnomalarida aks etadi!
           </p>
         </div>
       </div>
     );
   }
 
-  // Count active graded inputs
-  const changeCount = Object.keys(standardGrades).length + Object.keys(bonusGrades).length;
+  const changeCount = Object.keys(homeworkGrades).length + Object.keys(attendanceGrades).length + Object.keys(qaGrades).length;
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-[#141414] tracking-tight">Talabalarni Baholash</h1>
-          <p className="text-[#8E9299] text-xs mt-1">Dars oxirida har bir o&#39;quvchiga standart dars faolligi va qo&#39;shimcha yutuqlar uchun ballar yozish</p>
+          <p className="text-[#8E9299] text-xs mt-1">
+            Har bir uyga vazifa, darsdagi ishtirok hamda savol-javob dars turlari uchun 5 yulduzgacha baho va kunlik izoh yuborish
+          </p>
         </div>
 
-        {selectedGroupId && changeCount > 0 && (
+        {selectedGroupId && (changeCount > 0 || Object.keys(comments).length > 0) && (
           <button 
             onClick={saveGrades}
             disabled={isSaving}
-            className="bg-[#141414] text-white px-6 py-3 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-[1.01] active:scale-[0.99] transition disabled:opacity-50 shadow-md"
+            className="bg-[#141414] text-white px-6 py-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 hover:scale-[1.01] active:scale-[0.99] transition disabled:opacity-50 shadow-md"
           >
             <Save size={16} />
-            {isSaving ? 'Saqlanmoqda...' : `Barcha ${changeCount} ta bahoni saqlash`}
+            {isSaving ? 'Saqlanmoqda...' : `Barcha baho & izohlarni yuborish`}
           </button>
         )}
       </div>
@@ -134,15 +188,17 @@ const GradesPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         {/* Left column: Choose Group */}
         <div className="lg:col-span-1 space-y-4">
-          <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#8E9299] px-2 font-mono">Faol Guruhlar</h3>
+          <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#8E9299] px-2 font-mono">Guruhlar</h3>
           <div className="space-y-2">
-            {groups.map(g => (
+            {visibleGroups.map(g => (
               <button
                 key={g.id}
                 onClick={() => {
                   setSelectedGroupId(g.id);
-                  setStandardGrades({});
-                  setBonusGrades({});
+                  setHomeworkGrades({});
+                  setAttendanceGrades({});
+                  setQaGrades({});
+                  setComments({});
                 }}
                 className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all ${
                   selectedGroupId === g.id 
@@ -158,8 +214,8 @@ const GradesPage: React.FC = () => {
               </button>
             ))}
 
-            {groups.length === 0 && (
-              <p className="text-xs text-neutral-400 italic p-3 text-center">Mavjud guruhlar topilmadi.</p>
+            {visibleGroups.length === 0 && (
+              <p className="text-xs text-neutral-400 italic p-3 text-center">Guruhlar topilmadi.</p>
             )}
           </div>
         </div>
@@ -179,33 +235,39 @@ const GradesPage: React.FC = () => {
                   </span>
                   <div>
                     <h3 className="font-extrabold text-sm text-[#141414]">{selectedGroup.name} O&#39;quvchilari</h3>
-                    <p className="text-[10px] text-[#8E9299]">Reyting ballarini kiritish uchun yulduzchalarni bosing</p>
+                    <p className="text-[10px] text-[#8E9299]">Standart, Uy ishi va Savol-javob turlariga 5 tagacha yulduz va kunlik izoh bering</p>
                   </div>
                 </div>
 
                 <div className="flex gap-4 text-[10px] font-mono font-bold uppercase tracking-wider">
-                  <div className="flex items-center gap-1.5 text-amber-500">
-                    <Star size={14} className="fill-current" /> Standart (Harakat)
+                  <div className="flex items-center gap-1">
+                    <Star size={12} className="fill-blue-500 text-blue-500" /> Uyga vazifa
                   </div>
-                  <div className="flex items-center gap-1.5 text-purple-600">
-                    <Star size={14} className="fill-current" /> Bonus (Qo&#39;shimcha)
+                  <div className="flex items-center gap-1">
+                    <Star size={12} className="fill-amber-500 text-amber-500" /> Dars faollik
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Star size={12} className="fill-purple-600 text-purple-600" /> Savol-javob
                   </div>
                 </div>
               </div>
 
               <div className="divide-y divide-[#F5F5F7]">
                 {groupStudents.sort((a, b) => (b.points || 0) - (a.points || 0)).map((student, index) => {
-                  const sGrade = standardGrades[student.uid] || 0;
-                  const bGrade = bonusGrades[student.uid] || 0;
-                  const totalGraded = sGrade + bGrade;
+                  const hwGrade = homeworkGrades[student.uid] || 0;
+                  const attGrade = attendanceGrades[student.uid] || 0;
+                  const qaGrade = qaGrades[student.uid] || 0;
+                  const totalGraded = hwGrade + attGrade + qaGrade;
+                  const currentComment = comments[student.uid] || '';
 
                   return (
                     <div 
                       key={student.uid} 
-                      className={`p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#F5F5F7]/20 transition-all ${
+                      className={`p-6 flex flex-col xl:flex-row xl:items-center justify-between gap-6 hover:bg-[#F5F5F7]/20 transition-all ${
                         index < 3 ? 'bg-amber-50/5' : ''
                       }`}
                     >
+                      {/* Name Card */}
                       <div className="flex items-center gap-4 min-w-[200px]">
                         <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
                           index === 0 ? 'bg-yellow-400 text-white shadow-sm' : 
@@ -216,64 +278,98 @@ const GradesPage: React.FC = () => {
                           {index + 1}
                         </div>
                         <div>
-                          <p className="font-extrabold text-[#141414] text-sm flex items-center gap-1.5">
+                          <p className="font-extrabold text-[#141414] text-sm flex items-center gap-1.5 flex-wrap">
                             {student.fullName}
                             {index === 0 && (
-                              <span className="text-[9px] bg-yellow-400 text-white px-1.5 py-0.5 rounded-full uppercase font-mono tracking-tighter">Top Lider</span>
+                              <span className="text-[8px] bg-yellow-400 text-white px-2 py-0.5 rounded-full uppercase font-mono tracking-wider font-bold">Top Lider</span>
                             )}
                           </p>
-                          <p className="text-[10px] text-[#8E9299] font-mono">Umumiy reyting: <span className="font-bold text-[#141414]">{student.points || 0} Ball</span></p>
+                          <p className="text-[10px] text-[#8E9299] font-mono mt-0.5">Umumiy reyting: <span className="font-bold text-[#141414]">{student.points || 0} Ball</span></p>
                         </div>
                       </div>
 
-                      {/* Grading Star Controllers */}
-                      <div className="flex flex-wrap items-center gap-6">
-                        {/* Standard Activity Stars: 1-5 */}
-                        <div className="space-y-1">
-                          <span className="block text-[8px] font-mono font-bold uppercase tracking-widest text-[#8E9299]">Darsdagi Faollik (Max 5)</span>
+                      {/* Grading Star Matrix (3 rows) */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 max-w-2xl">
+                        {/* 1. Homework */}
+                        <div className="space-y-1 bg-blue-50/20 p-3 rounded-2xl border border-blue-100/10">
+                          <span className="block text-[8px] font-mono font-bold uppercase tracking-widest text-blue-800">1. Uyga vazifa (5 yulduz)</span>
                           <div className="flex items-center">
                             {[1, 2, 3, 4, 5].map(star => (
                               <button
                                 key={star}
-                                onClick={() => handleStandardGradeChange(student.uid, star)}
-                                className="p-1 rounded-lg hover:scale-110 active:scale-95 transition-all text-amber-400"
-                                title={`Darsdagi faollik: ${star} ball`}
+                                onClick={() => handleHomeworkGradeChange(student.uid, star)}
+                                className="p-1 rounded-lg hover:scale-110 active:scale-95 transition-all text-blue-500"
+                                title={`Uyga vazifa: ${star} ball`}
                               >
                                 <Star 
-                                  size={18} 
-                                  fill={sGrade >= star ? 'currentColor' : 'none'} 
-                                  className={sGrade >= star ? 'text-amber-400' : 'text-neutral-200'}
+                                  size={16} 
+                                  fill={hwGrade >= star ? 'currentColor' : 'none'} 
+                                  className={hwGrade >= star ? 'text-blue-500' : 'text-neutral-200'}
                                 />
                               </button>
                             ))}
                           </div>
                         </div>
 
-                        {/* Extra Bonus Stars: 1-5 */}
-                        <div className="space-y-1">
-                          <span className="block text-[8px] font-mono font-bold uppercase tracking-widest text-[#8E9299]">Bonus / Uy ishi (Max 5)</span>
+                        {/* 2. Class participation */}
+                        <div className="space-y-1 bg-amber-50/20 p-3 rounded-2xl border border-amber-100/10">
+                          <span className="block text-[8px] font-mono font-bold uppercase tracking-widest text-amber-800">2. Darsda qatnashganiga (5 yulduz)</span>
                           <div className="flex items-center">
                             {[1, 2, 3, 4, 5].map(star => (
                               <button
                                 key={star}
-                                onClick={() => handleBonusGradeChange(student.uid, star)}
+                                onClick={() => handleAttendanceGradeChange(student.uid, star)}
+                                className="p-1 rounded-lg hover:scale-110 active:scale-95 transition-all text-amber-500"
+                                title={`Darsda qatnashgani: ${star} ball`}
+                              >
+                                <Star 
+                                  size={16} 
+                                  fill={attGrade >= star ? 'currentColor' : 'none'} 
+                                  className={attGrade >= star ? 'text-amber-500' : 'text-neutral-200'}
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 3. QA / Q&A */}
+                        <div className="space-y-1 bg-purple-50/20 p-3 rounded-2xl border border-purple-100/10">
+                          <span className="block text-[8px] font-mono font-bold uppercase tracking-widest text-purple-800">3. Savol-javob (5 yulduz)</span>
+                          <div className="flex items-center">
+                            {[1, 2, 3, 4, 5].map(star => (
+                              <button
+                                key={star}
+                                onClick={() => handleQaGradeChange(student.uid, star)}
                                 className="p-1 rounded-lg hover:scale-110 active:scale-95 transition-all text-purple-600"
-                                title={`Qo'shimcha mukofot: ${star} ball`}
+                                title={`Savol-javob: ${star} ball`}
                               >
                                 <Star 
-                                  size={18} 
-                                  fill={bGrade >= star ? 'currentColor' : 'none'} 
-                                  className={bGrade >= star ? 'text-purple-600' : 'text-neutral-200'}
+                                  size={16} 
+                                  fill={qaGrade >= star ? 'currentColor' : 'none'} 
+                                  className={qaGrade >= star ? 'text-purple-600' : 'text-neutral-200'}
                                 />
                               </button>
                             ))}
                           </div>
                         </div>
+                      </div>
 
-                        {/* Session Total live Indicator */}
+                      {/* Daily Commentary and submit summary info */}
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <div className="relative w-full md:w-48">
+                          <MessageSquare className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={14} />
+                          <input 
+                            type="text"
+                            placeholder="Izoh yozing..."
+                            value={currentComment}
+                            onChange={(e) => handleCommentChange(student.uid, e.target.value)}
+                            className="pl-9 pr-3 py-2 w-full bg-[#F5F5F7] border border-transparent rounded-xl text-xs focus:bg-white focus:border-[#141414] focus:outline-none focus:ring-1 focus:ring-[#141414] font-medium"
+                          />
+                        </div>
+
                         {totalGraded > 0 && (
-                          <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl font-mono text-xs font-bold flex items-center gap-1 animate-bounce">
-                            <Sparkles size={12} />
+                          <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-3.5 py-2 rounded-xl font-mono text-xs font-bold flex items-center gap-1 shadow-sm">
+                            <Sparkles size={12} className="animate-pulse" />
                             +{totalGraded} ball
                           </div>
                         )}
@@ -283,7 +379,7 @@ const GradesPage: React.FC = () => {
                 })}
 
                 {groupStudents.length === 0 && (
-                  <p className="p-12 italic text-[#8E9299] text-xs text-center font-mono">Ushbu guruh guruh tarkibida o&#39;quvchilar aniqlanmadi.</p>
+                  <p className="p-12 italic text-[#8E9299] text-xs text-center font-mono">Guruh a'zolari topilmadi.</p>
                 )}
               </div>
             </motion.div>

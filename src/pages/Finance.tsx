@@ -17,7 +17,8 @@ import {
   Settings,
   ChevronDown,
   ChevronUp,
-  Edit2
+  Edit2,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
@@ -271,10 +272,10 @@ const FinancePage: React.FC = () => {
   };
 
   const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
-  const totalFines = attendances.reduce((sum, a) => sum + (a.status === 'absent' ? fineRates.absentFine : a.status === 'late' ? fineRates.lateFine : 0), 0);
+  const totalFines = attendances.filter(a => !a.paid).reduce((sum, a) => sum + (a.status === 'absent' ? fineRates.absentFine : a.status === 'late' ? fineRates.lateFine : 0), 0);
   
   const calculateFines = (sId: string) => {
-    const studentAtts = attendances.filter(a => a.studentId === sId);
+    const studentAtts = attendances.filter(a => a.studentId === sId && !a.paid);
     const absents = studentAtts.filter(a => a.status === 'absent').length;
     const lates = studentAtts.filter(a => a.status === 'late').length;
     return {
@@ -282,6 +283,65 @@ const FinancePage: React.FC = () => {
       lates,
       total: (absents * fineRates.absentFine) + (lates * fineRates.lateFine)
     };
+  };
+
+  // Student-specific calculations for balance and pays
+  const studentAllAtts = attendances.filter(a => a.studentId === profile?.uid);
+  const unpaidAttsForPoints = studentAllAtts.filter(a => !a.paid);
+  const presentsCount = studentAllAtts.filter(a => a.status === 'present').length;
+  
+  const penaltyAtts = unpaidAttsForPoints.filter(a => a.date >= '2026-05-21');
+  const penaltyAbsents = penaltyAtts.filter(a => a.status === 'absent').length;
+  const penaltyLates = penaltyAtts.filter(a => a.status === 'late').length;
+  const pointsDeduction = (penaltyAbsents * 5) + (penaltyLates * 3);
+  const netPoints = Math.max(0, (profile?.points || 0) - pointsDeduction);
+
+  const IS_AFTER_OR_ON_JUNE_3_2026 = new Date().toISOString() >= '2026-06-03';
+  const pointBonusCash = IS_AFTER_OR_ON_JUNE_3_2026 ? (Math.floor(netPoints / 40) * 1000) : 0;
+  
+  const earnedBalance = (netPoints * 20) + (presentsCount * 300) + pointBonusCash;
+  const myStudentCashBalance = Math.max(0, earnedBalance - (profile?.spentBalance || 0));
+
+  const handlePayFine = async (attendanceDoc: any) => {
+    if (!profile) return;
+    
+    const fineCost = attendanceDoc.status === 'absent' ? fineRates.absentFine : fineRates.lateFine;
+    
+    if (myStudentCashBalance < fineCost) {
+      alert(`Xatolik: Balansingizda yetarli mablag' mavjud emas! Kelmagan (${formatCurrency(fineRates.absentFine)}) va kechikish (${formatCurrency(fineRates.lateFine)}) jarimalarini yopish uchun hisobingiz kash shaklida so'm yetarli bo'lishi lozim.`);
+      return;
+    }
+    
+    if (window.confirm(`Ushbu jarimani (Sana: ${attendanceDoc.date}, Kurs: ${getCourseName(attendanceDoc.courseId)}) balansingizdan ${formatCurrency(fineCost)} yechib to'lashni tasdiqlaysizmi?`)) {
+      try {
+        // 1. Mark attendance as paid
+        await firestoreService.updateDocument('attendance', attendanceDoc.id, {
+          paid: true
+        });
+        
+        // 2. Update student spentBalance
+        const currentSpent = profile.spentBalance || 0;
+        await firestoreService.updateDocument('users', profile.uid, {
+          spentBalance: currentSpent + fineCost,
+          updatedAt: new Date().toISOString()
+        });
+        
+        // 3. Create a notification
+        await firestoreService.addDocument('notifications', {
+          userId: profile.uid,
+          title: "Davomat jarimasi yopildi",
+          message: `${attendanceDoc.date} kungi kelmagan/kechikkanlik darsi bo'yicha ${formatCurrency(fineCost)} jarima umumiy balansingiz hisobidan muvaffaqiyatli to'lab yopildi. Jarima ballari qayta tiklandi!`,
+          type: 'system',
+          read: false,
+          createdAt: new Date().toISOString()
+        });
+        
+        alert("Jarima muvaffaqiyatli to'landi! Ballaringiz va hisob-kitobingiz qayta tiklandi.");
+      } catch (err) {
+        console.error(err);
+        alert("To'lov jarayonida xatolik yuz berdi.");
+      }
+    }
   };
 
   const revenueByCourse = courses.map(course => {
@@ -408,7 +468,7 @@ const FinancePage: React.FC = () => {
           </motion.div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -442,6 +502,22 @@ const FinancePage: React.FC = () => {
               <span className="bg-orange-50 text-orange-600 px-2 py-0.5 rounded">
                 Kech (kechikkan) - {calculateFines(profile?.uid || '').lates} marta ({formatCurrency(fineRates.lateFine)})
               </span>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white p-8 rounded-3xl border border-[#E4E3E0] shadow-sm flex flex-col justify-center bg-emerald-50/5 border-emerald-200"
+          >
+            <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 mb-4">
+              <Sparkles size={24} className="animate-pulse" />
+            </div>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-[#8E9299] mb-1">Mening Bo'sh Balansim</p>
+            <h2 className="text-3xl font-bold text-emerald-600">{formatCurrency(myStudentCashBalance)}</h2>
+            <div className="mt-4 flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+              Balansdan foydalanib jarimalaringizni yoping!
             </div>
           </motion.div>
         </div>
@@ -845,6 +921,7 @@ const FinancePage: React.FC = () => {
                       <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Kurs</th>
                       <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Holat</th>
                       <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299]">Jarima miqdori</th>
+                      <th className="px-8 py-5 text-xs font-mono uppercase tracking-widest text-[#8E9299] text-center">Amal (To'lash)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E4E3E0]">
@@ -852,26 +929,53 @@ const FinancePage: React.FC = () => {
                       .filter(a => a.status === 'absent' || a.status === 'late')
                       .filter(a => getCourseName(a.courseId).toLowerCase().includes(searchTerm.toLowerCase()) || a.date.includes(searchTerm))
                       .sort((a, b) => b.date.localeCompare(a.date))
-                      .map((a, idx) => (
-                        <tr key={a.id || idx} className="hover:bg-[#F5F5F7]/30 transition-colors">
-                          <td className="px-8 py-5 font-medium text-xs text-[#141414]">
-                            {a.date}
-                          </td>
-                          <td className="px-8 py-5 font-bold text-xs text-[#141414]">
-                            {getCourseName(a.courseId)}
-                          </td>
-                          <td className="px-8 py-5">
-                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                              a.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
-                            }`}>
-                              {a.status === 'absent' ? 'Dars Qoldirdi' : 'Kech Qoldi'}
-                            </span>
-                          </td>
-                          <td className="px-8 py-5 font-mono font-bold text-red-600 text-xs">
-                            {formatCurrency(a.status === 'absent' ? fineRates.absentFine : fineRates.lateFine)}
-                          </td>
-                        </tr>
-                      ))}
+                      .map((a, idx) => {
+                        const fineCost = a.status === 'absent' ? fineRates.absentFine : fineRates.lateFine;
+                        return (
+                          <tr key={a.id || idx} className="hover:bg-[#F5F5F7]/30 transition-colors">
+                            <td className="px-8 py-5 font-medium text-xs text-[#141414]">
+                              {a.date}
+                            </td>
+                            <td className="px-8 py-5 font-bold text-xs text-[#141414]">
+                              {getCourseName(a.courseId)}
+                            </td>
+                            <td className="px-8 py-5">
+                              {a.paid ? (
+                                <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                  Yopilgan (To'langan)
+                                </span>
+                              ) : (
+                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
+                                  a.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
+                                }`}>
+                                  {a.status === 'absent' ? 'Dars Qoldirdi' : 'Kech Qoldi'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-8 py-5 font-mono font-bold text-red-600 text-xs">
+                              {a.paid ? (
+                                <span className="text-emerald-600 line-through">{formatCurrency(fineCost)}</span>
+                              ) : (
+                                <span>{formatCurrency(fineCost)}</span>
+                              )}
+                            </td>
+                            <td className="px-8 py-5 text-center">
+                              {a.paid ? (
+                                <span className="text-xs font-bold text-emerald-600 inline-flex items-center gap-1">
+                                  <Sparkles size={12} /> Yopilgan
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handlePayFine(a)}
+                                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-bold active:scale-[0.98] transition-all"
+                                >
+                                  Balansdan yopish
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     {attendances.filter(a => a.status === 'absent' || a.status === 'late').length === 0 && (
                       <tr>
                         <td colSpan={4} className="px-8 py-20 text-center">

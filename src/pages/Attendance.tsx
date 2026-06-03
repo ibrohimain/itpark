@@ -24,11 +24,30 @@ const AttendancePage: React.FC = () => {
   const isStaff = profile?.role === 'director' || 
     ['ustoz', 'yoramchi ustoz', 'direktor o\'rin bosari', 'dasturchi', 'mobilograf', 'backent', 'frontend', 'dizayner', 'xodim III darajali', 'xodim II darajali', 'xodim I darajali', 'staff'].includes(profile?.role || '');
 
+  const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
+  const isUstoz = profile?.role === 'ustoz';
+
+  const visibleGroups = React.useMemo(() => {
+    return groups.filter(g => {
+      if (isDirector) return true;
+      if (isUstoz) return g.teacherId === profile?.uid;
+      if (profile?.role === 'ustoz' || profile?.role === 'yoramchi ustoz') {
+        return g.teacherId === profile?.uid;
+      }
+      return true;
+    });
+  }, [groups, profile, isDirector, isUstoz]);
+
+  useEffect(() => {
+    if (visibleGroups.length > 0 && (!selectedGroupId || !visibleGroups.some(g => g.id === selectedGroupId))) {
+      setSelectedGroupId(visibleGroups[0].id);
+    }
+  }, [visibleGroups, selectedGroupId]);
+
   useEffect(() => {
     const unsubCourses = firestoreService.subscribeToDocuments<Course>('courses', [], setCourses);
     const unsubGroups = firestoreService.subscribeToDocuments<Group>('groups', [], (data) => {
       setGroups(data);
-      if (data.length > 0 && !selectedGroupId) setSelectedGroupId(data[0].id);
     });
     
     if (isStaff) {
@@ -57,7 +76,7 @@ const AttendancePage: React.FC = () => {
 
   useEffect(() => {
     if (selectedGroupId && isStaff) {
-      const group = groups.find(g => g.id === selectedGroupId);
+      const group = visibleGroups.find(g => g.id === selectedGroupId);
       if (group) {
         // Query only by courseId to avoid composite index requirement
         const unsubAtt = firestoreService.subscribeToDocuments<Attendance>('attendance', [
@@ -74,10 +93,10 @@ const AttendancePage: React.FC = () => {
         return () => unsubAtt();
       }
     }
-  }, [selectedGroupId, selectedDate, isStaff, groups, viewMode, selectedMonth, selectedYear]);
+  }, [selectedGroupId, selectedDate, isStaff, visibleGroups, viewMode, selectedMonth, selectedYear]);
 
   const markAttendance = async (studentId: string, status: 'present' | 'absent' | 'late') => {
-    const group = groups.find(g => g.id === selectedGroupId);
+    const group = visibleGroups.find(g => g.id === selectedGroupId);
     if (!group) return;
 
     const existing = attendances.find(a => a.studentId === studentId && a.date === selectedDate && a.courseId === group.courseId);
@@ -107,7 +126,7 @@ const AttendancePage: React.FC = () => {
 
   const getCourseName = (id: string) => courses.find(c => c.id === id)?.name || 'Nomaʼlum kurs';
 
-  const selectedGroup = groups.find(g => g.id === selectedGroupId);
+  const selectedGroup = visibleGroups.find(g => g.id === selectedGroupId);
   const groupStudents = students
     .filter(s => selectedGroup?.studentIds.includes(s.uid))
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
@@ -250,7 +269,7 @@ const AttendancePage: React.FC = () => {
                 onChange={(e) => setSelectedGroupId(e.target.value)}
                 className="w-full px-5 py-4 bg-[#F5F5F7] border-none rounded-2xl text-sm"
               >
-                {groups.map(g => <option key={g.id} value={g.id}>{g.name} ({getCourseName(g.courseId)})</option>)}
+                {visibleGroups.map(g => <option key={g.id} value={g.id}>{g.name} ({getCourseName(g.courseId)})</option>)}
               </select>
             </div>
             

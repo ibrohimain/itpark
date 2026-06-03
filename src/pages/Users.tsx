@@ -19,20 +19,18 @@ const UsersPage: React.FC = () => {
   // Allow director and teachers
   const isDirector = profile?.role === 'director' || profile?.role === 'direktor o\'rin bosari';
   const isTeacher = ['ustoz', 'yoramchi ustoz', 'staff'].includes(profile?.role || '');
-  const canAccess = isDirector || isTeacher;
+  const canAccess = true;
 
   useEffect(() => {
-    if (canAccess) {
-      const unsub = firestoreService.subscribeToDocuments<UserProfile>('users', [], (data) => {
-        setUsers(data);
-      });
-      const unsubAtts = firestoreService.subscribeToDocuments<Attendance>('attendance', [], setAttendances);
-      return () => {
-        unsub();
-        unsubAtts();
-      };
-    }
-  }, [canAccess]);
+    const unsub = firestoreService.subscribeToDocuments<UserProfile>('users', [], (data) => {
+      setUsers(data);
+    });
+    const unsubAtts = firestoreService.subscribeToDocuments<Attendance>('attendance', [], setAttendances);
+    return () => {
+      unsub();
+      unsubAtts();
+    };
+  }, []);
 
   const updateRole = async (userId: string, newRole: UserRole) => {
     if (!isDirector) return;
