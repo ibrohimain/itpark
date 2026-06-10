@@ -196,10 +196,17 @@ const ITParkFinance: React.FC = () => {
   // Total overall expenses: salaries + general expenses + comp service expenses
   const totalExpensesSum = totalSalariesVal + totalStandardExpensesVal + totalCompExpensesVal;
 
-  // I. Net Profit (Sof foida - "sof foida it park foizi tushumdan qolgan pul" or revenue - it park royalty)
-  const netProfitVal = Math.max(0, totalRevenueVal - itParkRoyaltyVal);
+  // I. Net Profit (Sof foyda)
+  const sofFoydaVal = totalRevenueVal - itParkRoyaltyVal - totalSalariesVal;
 
-  // J. Remaining Cash (Qolgan pul): Revenue - Royalty 20% - salaries - custom expenses
+  // J. Center Expenses: markaz uchun buyumlar va jihozlar uchun xarajatlarning jami miqdori
+  const centerExpensesVal = totalStandardExpensesVal + totalCompExpensesVal;
+
+  // K. Yakuniy Oy Balansi (Remaining cash / Total final cash balance)
+  const finalBalanceVal = sofFoydaVal - centerExpensesVal;
+
+  // Keep old fallback variables for safe compatibility
+  const netProfitVal = Math.max(0, totalRevenueVal - itParkRoyaltyVal);
   const remainingCashVal = Math.max(0, totalRevenueVal - itParkRoyaltyVal - totalSalariesVal - totalStandardExpensesVal - totalCompExpensesVal);
 
   // K. Deposited to safe of computer/general
@@ -394,6 +401,173 @@ const ITParkFinance: React.FC = () => {
     alert("PDF Hujjat muvaffaqiyatli tayyorlandi va yuklab olindi!");
   };
 
+  // Full-featured dynamic ledger Nakladnoy Report PDF for IT Park Director
+  const generateMonthlyNakladnoyPDF = () => {
+    const doc = new jsPDF();
+    
+    // Header Decor with slate modern vibe
+    doc.setFillColor(20, 20, 20);
+    doc.rect(0, 0, 210, 42, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text("IT PARK JIZPI MOLIYAVIY HISOBOTI & NAKLADNOYI", 14, 18);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Filial hujjati | Tanlangan hisobot oyi: ${selectedMonth}`, 14, 26);
+    doc.text(`Yuklangan sana va vaqt: ${new Date().toLocaleDateString('uz-UZ')} ${new Date().toLocaleTimeString('uz-UZ')}`, 14, 32);
+
+    doc.setTextColor(20, 20, 20);
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text("OYLIK REYESTR JADVALLARI (MOLIYA TAQSIMOTI):", 14, 52);
+    
+    const tableData: any[] = [];
+    
+    // 1. INCOMES
+    tableData.push([{ content: "I. KIRIMLAR (PULLAR KELISH MANBALARI)", colSpan: 3, styles: { fillColor: [240, 248, 243], fontStyle: "bold", textColor: [16, 124, 65] } }]);
+    tableData.push(["Tushum va daromad manbalari", "Izoh / Tafsilot", "Summa (UZS)"]);
+    
+    tableData.push([
+      "O'quvchilar To'lovlari (Kurs badallari)",
+      `Faol o'quvchilardan ayni shu ${selectedMonth} oyi uchun tushgan naqd va plastik badallar`,
+      formatUZS(totalStudentPaymentsVal)
+    ]);
+    
+    if (totalCompIncomesVal > 0) {
+      tableData.push([
+        "Kompyuter Xizmatlari tushumlari",
+        "Kompyuter ta'mirlash, o'rnatish va diagnostika daromadlari",
+        formatUZS(totalCompIncomesVal)
+      ]);
+    }
+    
+    // Custom standard incomes
+    const stIncomes = currentIncomes.filter(i => i.type === 'standard');
+    stIncomes.forEach(inc => {
+      tableData.push([
+        `Qo'shimcha tushum: ${inc.source}`,
+        `Kassa va boshqa hamkorlik tushumlari (${inc.date})`,
+        formatUZS(inc.amount)
+      ]);
+    });
+    
+    tableData.push([
+      { content: "JAMI TUSHUM (KIRIMLAR):", colSpan: 2, styles: { fontStyle: "bold", halign: "right" } },
+      { content: formatUZS(totalRevenueVal), styles: { fontStyle: "bold", textColor: [16, 124, 65] } }
+    ]);
+
+    // 2. EXPENSES
+    tableData.push([{ content: "II. CHIQIMLAR VA MAJBURIY TO'LOVLAR (PULLAR KETISH SABABLARI)", colSpan: 3, styles: { fillColor: [253, 242, 242], fontStyle: "bold", textColor: [185, 28, 28] } }]);
+    tableData.push(["Xarajat va chiqim turlari", "Tafsilotlar", "Summa (UZS)"]);
+    
+    tableData.push([
+      "IT Park 20% Ulush To'lovi",
+      `Umumiy tushum (${formatUZS(totalRevenueVal)}) ning shartnomaviy 20% royalty ulushi`,
+      formatUZS(itParkRoyaltyVal)
+    ]);
+    
+    tableData.push([
+      "Xodimlar Oylik Maoshlari (Jami)",
+      `O'qituvchilar darsbay, ma'muriyat xodimlari va rag'batlar to'lovi`,
+      formatUZS(totalSalariesVal)
+    ]);
+    
+    currentSalaries.forEach(s => {
+      tableData.push([
+        `   - Oylik: ${s.staffName}`,
+        `Maqsad: ${s.reason} (${s.date})`,
+        formatUZS(s.amount)
+      ]);
+    });
+
+    const standardExps = currentExpenses.filter(e => e.type === 'standard');
+    standardExps.forEach(exp => {
+      tableData.push([
+        `   - Ofis jihozlari/buyumlari: ${exp.purpose}`,
+        `Markaz ehtiyoji uchun sotib olingan buyum va xarajatlar (${exp.date})`,
+        formatUZS(exp.amount)
+      ]);
+    });
+
+    const compExps = currentExpenses.filter(e => e.type === 'computer_service');
+    compExps.forEach(exp => {
+      tableData.push([
+        `   - Kompyuter xizmati xarajati: ${exp.purpose}`,
+        `Uskunalar, dasturiy litsenziya va butlovchi qismlar (${exp.date})`,
+        formatUZS(exp.amount)
+      ]);
+    });
+    
+    const overallExpenses = itParkRoyaltyVal + totalSalariesVal + totalStandardExpensesVal + totalCompExpensesVal;
+    tableData.push([
+      { content: "JAMI XARAJAT VA CHIQIM:", colSpan: 2, styles: { fontStyle: "bold", halign: "right" } },
+      { content: formatUZS(overallExpenses), styles: { fontStyle: "bold", textColor: [185, 28, 28] } }
+    ]);
+
+    // 3. STATS IN A NUTSHELL
+    const isOverNegative = finalBalanceVal < 0;
+    const outcomeText = isOverNegative 
+      ? `MINUSDA OY YOPILDI (ZARAR / KAMOMAD: -${formatUZS(Math.abs(finalBalanceVal))})` 
+      : `PILUSDA OY YOPILDI (SOF FOYDA: +${formatUZS(finalBalanceVal)})`;
+      
+    const outcomeBg = isOverNegative ? [254, 226, 226] : [220, 252, 231];
+    const outcomeTextClr = isOverNegative ? [185, 28, 28] : [22, 101, 52];
+
+    tableData.push([{ content: "III. MOYNING FISKAL REYESTR BALANSI", colSpan: 3, styles: { fillColor: [247, 247, 249], fontStyle: "bold" } }]);
+    tableData.push(["Jami Tushum", "Barcha manbalardan kelgan tushum", formatUZS(totalRevenueVal)]);
+    tableData.push(["IT Park 20% Royalty", "IT Park foydasiga ajratilgan 20% to'lov", formatUZS(itParkRoyaltyVal)]);
+    tableData.push(["Xodimlar maoshlari", "Markaz xodimlariga berilgan ish haqlari", formatUZS(totalSalariesVal)]);
+    tableData.push(["Sof Foyda (Markazgacha)", "Tushumdan 20% va oyliklar chegirilgach qolgan sof foida", formatUZS(Math.max(0, sofFoydaVal))]);
+    tableData.push(["Markaz xarajatlari (Buyumlar uchun)", "Barcha kassa xarajatlari va jihozlar uchun xarajat", formatUZS(centerExpensesVal)]);
+    tableData.push([
+      { content: "OY YOPILISH BALANSI (YAKUNIY STATUS):", colSpan: 2, styles: { fontStyle: "bold", halign: "right", fillColor: outcomeBg, textColor: outcomeTextClr } },
+      { content: outcomeText, styles: { fontStyle: "bold", fillColor: outcomeBg, textColor: outcomeTextClr } }
+    ]);
+
+    autoTable(doc, {
+      startY: 56,
+      head: [["Moliyaviy ko'rsatkich", "Tafsilot va Izohlar", "Summa (UZS / Status)"]],
+      body: tableData,
+      theme: 'grid',
+      styles: { fontSize: 8.5 },
+      headStyles: { fillColor: [20, 20, 20], textColor: [255, 255, 255] },
+      columnStyles: {
+        0: { cellWidth: 55 },
+        1: { cellWidth: 90 },
+        2: { cellWidth: 45 }
+      }
+    });
+
+    let finalY = (doc as any).lastAutoTable.finalY + 12;
+    if (finalY > 230) {
+      doc.addPage();
+      finalY = 25;
+    }
+
+    doc.setDrawColor(200, 200, 200);
+    doc.setFillColor(252, 252, 252);
+    doc.rect(14, finalY, 182, 45, 'FD');
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("IT PARK DIREKTORI TASDIQLASHI VA IMZO SOHASI", 18, finalY + 10);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Tizim vakili (IT Park JizPI): ${profile?.fullName || 'IT Park Director'}`, 18, finalY + 19);
+    doc.text("Ushbu oylik kirim, IT Park royalty-ulushi, oylik maoshlar, uskunalar va jihozlar xarajatlari tahlili to'liq", 18, finalY + 25);
+    doc.text("hisoblanganligini tasdiqlayman va oy yakuni hisob-kitoblarini imzo chekib qabul qilaman.", 18, finalY + 31);
+
+    doc.setFont("helvetica", "bold");
+    doc.text("IT Park Direktori Imzosi: __________________________", 18, finalY + 40);
+    doc.text(`Sana: ${new Date().toLocaleDateString('uz-UZ')}`, 130, finalY + 40);
+
+    doc.save(`IT_PARK_MOLIYA_HISOBOTI_${selectedMonth}.pdf`);
+    alert("Ushbu oy uchun to'liq moliya hisoboti va nakladnoyi PDF shaklida yuklab olindi!");
+  };
+
   return (
     <div className="space-y-8" id="itpark_finance_page">
       {/* Header Panel */}
@@ -403,15 +577,26 @@ const ITParkFinance: React.FC = () => {
           <p className="text-xs text-[#8E9299] mt-1 uppercase font-mono tracking-widest">Faqat hisobot beruvchi Direktor uchun</p>
         </div>
 
-        {/* Month Selector */}
-        <div className="flex items-center gap-2 bg-[#F5F5F7] p-2 rounded-2xl">
-          <Calendar size={16} className="text-[#8E9299] ml-2" />
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="bg-transparent text-xs font-bold text-[#141414] focus:outline-none pr-2 py-1"
-          />
+        {/* Month Selector & PDF Button */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-[#F5F5F7] p-2 rounded-2xl">
+            <Calendar size={16} className="text-[#8E9299] ml-2" />
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="bg-transparent text-xs font-bold text-[#141414] focus:outline-none pr-2 py-1"
+            />
+          </div>
+
+          <button
+            onClick={generateMonthlyNakladnoyPDF}
+            className="bg-[#141414] hover:bg-neutral-800 text-white text-xs font-bold px-4 py-3 rounded-2xl flex items-center gap-2 transition active:scale-95 shadow-xs"
+            title="Sanoqli ushbu oyning umumiy tushumi, xarajatlari va qolgan daromadlari solishtirilgan PDF hujjat shaklida yuklash"
+          >
+            <Printer size={15} />
+            Oy Hisoboti Nakladnoy (PDF)
+          </button>
         </div>
       </div>
 
@@ -457,59 +642,103 @@ const ITParkFinance: React.FC = () => {
             className="space-y-8"
           >
             {/* Balance Spreadsheet Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {/* Card 1: Total Revenue */}
-              <div className="bg-white p-6 rounded-3xl border border-[#E4E3E0]">
-                <div className="flex justify-between items-start mb-4">
-                  <span className="text-xs text-[#8E9299] font-medium">1. Jami Tushum ({selectedMonth})</span>
-                  <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
-                    <TrendingUp size={16} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+              {/* Card 1: Jami Tushum */}
+              <div className="bg-white p-6 rounded-3xl border border-[#E4E3E0] flex flex-col justify-between hover:shadow-xs transition">
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <span className="text-xs text-[#8E9299] font-medium font-mono uppercase tracking-wider">1. Jami Tushum</span>
+                    <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
+                      <TrendingUp size={16} />
+                    </div>
                   </div>
+                  <h3 className="text-base font-extrabold text-[#141414] leading-tight">{formatUZS(totalRevenueVal)}</h3>
                 </div>
-                <h3 className="text-lg font-extrabold text-[#141414]">{formatUZS(totalRevenueVal)}</h3>
-                <div className="text-[10px] text-[#8E9299] mt-2 space-y-1 font-mono">
-                  <p>O'quvchilardan: {formatUZS(totalStudentPaymentsVal)}</p>
-                  <p>Kompyuterdan: {formatUZS(totalCompIncomesVal)}</p>
+                <div className="text-[9px] text-[#8E9299] mt-3 pt-2 border-t border-dashed border-gray-100 font-mono space-y-0.5">
+                  <p>O'quvchi: {formatUZS(totalStudentPaymentsVal)}</p>
+                  <p>Xizmatlar: {formatUZS(totalCompIncomesVal)}</p>
                   <p>Qo'shimcha: {formatUZS(totalStandardCustomIncomesVal)}</p>
                 </div>
               </div>
 
-              {/* Card 2: IT Park 20% Percent check */}
-              <div className="bg-[#FFFDF5] p-6 rounded-3xl border border-amber-200">
-                <div className="flex justify-between items-start mb-4">
-                  <span className="text-xs text-amber-800 font-semibold">2. IT Park 20% To&#39;lovi</span>
-                  <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl">
-                    <Flame size={16} />
+              {/* Card 2: IT Park 20% */}
+              <div className="bg-[#FFFDF5] p-6 rounded-3xl border border-amber-200 flex flex-col justify-between hover:shadow-xs transition">
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <span className="text-xs text-amber-800 font-semibold font-mono uppercase tracking-wider">2. IT Park 20%</span>
+                    <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl">
+                      <Flame size={16} />
+                    </div>
                   </div>
+                  <h3 className="text-base font-extrabold text-amber-800 leading-tight">{formatUZS(itParkRoyaltyVal)}</h3>
                 </div>
-                <h3 className="text-lg font-extrabold text-amber-800">{formatUZS(itParkRoyaltyVal)}</h3>
-                <p className="text-[9px] text-[#8E9299] mt-2">Umumiy tushumdan shartnomaviy 20% royalty ajratmasi</p>
+                <p className="text-[9px] text-amber-700/80 mt-3 pt-2 border-t border-dashed border-amber-100/50">Umumiy tushumdan shartnomaviy 20% ulushi</p>
               </div>
 
-              {/* Card 3: Sof Foyda */}
-              <div className="bg-[#F5FFF8] p-6 rounded-3xl border border-emerald-200">
-                <div className="flex justify-between items-start mb-4">
-                  <span className="text-xs text-emerald-800 font-semibold">3. Sof Foyda</span>
-                  <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
-                    <TrendingUp size={16} />
+              {/* Card 3: Xodim Maoshlari */}
+              <div className="bg-[#FDF9F9] p-6 rounded-3xl border border-red-200 flex flex-col justify-between hover:shadow-xs transition">
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <span className="text-xs text-red-800 font-semibold font-mono uppercase tracking-wider">3. Xodim Maoshlari</span>
+                    <div className="p-2.5 bg-red-50 text-red-600 rounded-xl">
+                      <Users size={16} />
+                    </div>
                   </div>
+                  <h3 className="text-base font-extrabold text-red-800 leading-tight">{formatUZS(totalSalariesVal)}</h3>
                 </div>
-                <h3 className="text-lg font-extrabold text-emerald-800">{formatUZS(netProfitVal)}</h3>
-                <p className="text-[9px] text-[#8E9299] mt-2">IT Park 20% foizi chiqarib tashlanganidan keyingi daromad</p>
+                <p className="text-[9px] text-red-700/80 mt-3 pt-2 border-t border-dashed border-red-100/50">O'qituvchilar va ma'muriyat maoshlari</p>
               </div>
 
-              {/* Card 4: Qolgan pul */}
-              <div className="bg-neutral-900 p-6 rounded-3xl text-white relative overflow-hidden">
-                <div className="flex justify-between items-start mb-4 relative z-10">
-                  <span className="text-xs text-neutral-300 font-medium">4. Sof Qolgan Pul</span>
-                  <div className="p-2.5 bg-neutral-800 text-white rounded-xl">
-                    <DollarSign size={16} />
+              {/* Card 4: Sof Foyda */}
+              <div className="bg-[#F5FFF8] p-6 rounded-3xl border border-emerald-200 flex flex-col justify-between hover:shadow-xs transition">
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <span className="text-xs text-emerald-800 font-semibold font-mono uppercase tracking-wider">4. Sof Foyda</span>
+                    <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
+                      <TrendingUp size={16} />
+                    </div>
                   </div>
+                  <h3 className="text-base font-extrabold text-emerald-800 leading-tight">{formatUZS(sofFoydaVal)}</h3>
                 </div>
-                <h3 className="text-xl font-black text-white relative z-10">{formatUZS(remainingCashVal)}</h3>
-                <div className="text-[10px] text-neutral-400 mt-2 relative z-10 space-y-0.5 font-mono">
-                  <p>Maoshlar: -{formatUZS(totalSalariesVal)}</p>
-                  <p>Xarajatlar: -{formatUZS(totalStandardExpensesVal + totalCompExpensesVal)}</p>
+                <p className="text-[9px] text-emerald-700/80 mt-3 pt-2 border-t border-dashed border-emerald-100/50">O'qituvchilarga oylik bergandan so'ng qoladigan sof foyda (Ushbu pul ichidan markaz xarajatlari to'lanadi)</p>
+              </div>
+
+              {/* Card 5: Markaz Xarajatlari */}
+              <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 flex flex-col justify-between hover:shadow-xs transition">
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <span className="text-xs text-slate-700 font-semibold font-mono uppercase tracking-wider">5. Markaz Buyumlari</span>
+                    <div className="p-2.5 bg-slate-100 text-slate-600 rounded-xl">
+                      <ClipboardList size={16} />
+                    </div>
+                  </div>
+                  <h3 className="text-base font-extrabold text-slate-800 leading-tight">{formatUZS(centerExpensesVal)}</h3>
+                </div>
+                <p className="text-[9px] text-slate-600/85 mt-3 pt-2 border-t border-dashed border-slate-200/50">Sof foyda ichidan markaz uchun buyumlar va jihozlar ehtiyojiga qilingan xarajatlar</p>
+              </div>
+
+              {/* Card 6: Yakuniy Oy Balansi */}
+              <div className={`${finalBalanceVal < 0 ? 'bg-red-950 border-red-900 text-red-100' : 'bg-[#141414] border-neutral-800 text-neutral-100'} p-6 rounded-3xl border flex flex-col justify-between relative overflow-hidden transition`}>
+                <div className="absolute top-[-30px] right-[-30px] w-24 h-24 bg-white/5 rounded-full blur-xl pointer-events-none" />
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <span className={`text-xs font-bold font-mono uppercase tracking-wider ${finalBalanceVal < 0 ? 'text-red-300' : 'text-neutral-300'}`}>6. Yakuniy Balans</span>
+                    <div className="p-2 bg-white/10 rounded-xl">
+                      <DollarSign size={16} className="text-white" />
+                    </div>
+                  </div>
+                  <h3 className="text-base font-black text-white leading-tight">{formatUZS(finalBalanceVal)}</h3>
+                </div>
+                <div className="mt-3 pt-2 border-t border-dashed border-white/15">
+                  {finalBalanceVal < 0 ? (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-red-900/50 border border-red-700/30 px-2 py-0.5 rounded-full text-red-200">
+                      Zarar (Minus): -{formatUZS(Math.abs(finalBalanceVal))}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-emerald-900/50 border border-emerald-700/30 px-2 py-0.5 rounded-full text-emerald-200">
+                      Sof qolgan pul: +{formatUZS(finalBalanceVal)}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
