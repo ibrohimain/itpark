@@ -28,6 +28,10 @@ export interface UserProfile {
   bio?: string;
   statuses?: Array<{ id: string; text: string; createdAt: string; }>;
   spentBalance?: number; // Cash spent on paying off fines
+  joinedDate?: string;
+  leftDate?: string;
+  isGraduated?: boolean;
+  graduatedDate?: string;
   createdAt: string;
   updatedAt: string;
 }

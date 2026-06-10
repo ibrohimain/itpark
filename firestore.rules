@@ -179,5 +179,21 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isDirector() || isStaff();
     }
+
+    match /itpark_salaries/{id} {
+      allow read, write: if isDirector();
+    }
+
+    match /itpark_expenses/{id} {
+      allow read, write: if isDirector();
+    }
+
+    match /itpark_incomes/{id} {
+      allow read, write: if isDirector();
+    }
+
+    match /itpark_safe/{id} {
+      allow read, write: if isDirector();
+    }
   }
 }

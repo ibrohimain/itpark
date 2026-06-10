@@ -45,6 +45,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { name: 'Groups', path: '/groups', icon: Users, roles: ['staff', 'director'] },
     { name: 'Ranking', path: '/ranking', icon: Trophy, roles: ['*'] },
     { name: 'Finance', path: '/finance', icon: CreditCard, roles: ['*'] },
+    { name: 'O\'quvchilar Statistikasi [Dir]', path: '/student-analytics', icon: Trophy, roles: ['director'] },
+    { name: 'IT Park Moliya [Dir]', path: '/itpark-finance', icon: CreditCard, roles: ['director'] },
   ];
 
   const checkRole = (itemRoles: string[]) => {
@@ -73,7 +75,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <p className="text-xs text-[#8E9299] font-mono mt-1 uppercase tracking-widest">Platform v1.0</p>
         </div>
 
-        <nav className="flex-1 space-y-1">
+        <nav className="flex-1 space-y-1 overflow-y-auto pr-1 max-h-[calc(100vh-290px)]">
           {filteredNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
